@@ -1,0 +1,33 @@
+# Build
+build/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Wails / frontend build
+frontend/dist/
+.fsrs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local DB (optional: раскомментируйте, если не хранить БД в репозитории)
+# *.db
+
+# Installer temp
+build/windows/installer/tmp/
+
+# Env / secrets
+.env
+.env.local
+*.local

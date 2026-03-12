@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FCS AutoReport</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-row">
+        <div>
+          <h1>FCS AutoReport</h1>
+          <p class="subtitle" data-i18n="subtitle"></p>
+        </div>
+        <div class="lang-switcher">
+          <button type="button" class="lang-btn" data-lang="ru" title="Русский">RU</button>
+          <button type="button" class="lang-btn" data-lang="en" title="English">EN</button>
+          <button type="button" class="lang-btn" data-lang="he" title="עברית">HE</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2 data-i18n="reportGen_title"></h2>
+        <div class="field">
+          <label data-i18n="reportGen_rawLabel"></label>
+          <input type="text" id="rawPath" data-i18n-placeholder="reportGen_rawPlaceholder" />
+          <button type="button" id="btnRaw" data-i18n="btn_select"></button>
+        </div>
+        <div class="field">
+          <label data-i18n="reportGen_templateLabel"></label>
+          <input type="text" id="templatePath" data-i18n-placeholder="reportGen_templatePlaceholder" />
+          <button type="button" id="btnTemplate" data-i18n="btn_select"></button>
+        </div>
+        <div class="field">
+          <label data-i18n="reportGen_outputLabel"></label>
+          <input type="text" id="outputDir" data-i18n-placeholder="reportGen_outputPlaceholder" />
+          <button type="button" id="btnOutput" data-i18n="btn_select"></button>
+        </div>
+        <div class="generate-row">
+          <button type="button" id="btnGenerate" class="primary" data-i18n="reportGen_btnGenerate"></button>
+          <button type="button" id="btnOpenReportFolder" class="btn-secondary" style="display: none;" data-i18n="reportGen_btnOpenFolder"></button>
+          <span id="generateStatus" class="generate-status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="card dictionaries-section">
+        <h2 data-i18n="dict_title"></h2>
+        <p class="dict-desc" data-i18n="dict_desc"></p>
+        <div class="dict-buttons">
+          <button type="button" id="btnImportCities" class="btn-secondary" data-i18n="dict_importCities"></button>
+          <button type="button" id="btnImportDrivers" class="btn-secondary" data-i18n="dict_importDrivers"></button>
+          <button type="button" id="btnImportItems" class="btn-secondary" data-i18n="dict_importItems"></button>
+        </div>
+      </section>
+
+      <section class="card dict-manager-section">
+        <h2 data-i18n="manager_title"></h2>
+        <div class="tab-buttons">
+          <button type="button" id="tabBtnCities" class="tab-btn tab-btn-active" data-i18n="tab_cities"></button>
+          <button type="button" id="tabBtnDrivers" class="tab-btn" data-i18n="tab_drivers"></button>
+          <button type="button" id="tabBtnItems" class="tab-btn" data-i18n="tab_items"></button>
+        </div>
+
+        <div id="tabContentCities" class="tab-content">
+          <p class="dict-desc" data-i18n="cities_desc"></p>
+          <div class="dict-buttons" style="margin-bottom: 10px;">
+            <button type="button" id="btnRefreshCities" class="btn-secondary" data-i18n="btn_refresh"></button>
+            <button type="button" id="btnAddCity" class="primary" data-i18n="btn_addCity"></button>
+          </div>
+          <div class="table-wrap">
+            <table class="table-cities" id="citiesTable">
+              <thead>
+                <tr>
+                  <th data-i18n="th_id"></th>
+                  <th data-i18n="th_name"></th>
+                  <th data-i18n="th_code"></th>
+                  <th data-i18n="th_aliases"></th>
+                  <th data-i18n="th_actions"></th>
+                </tr>
+              </thead>
+              <tbody id="citiesTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tabContentDrivers" class="tab-content" style="display: none;">
+          <div class="dict-buttons" style="margin-bottom: 10px;">
+            <button type="button" id="btnRefreshDrivers" class="btn-secondary" data-i18n="btn_refresh"></button>
+            <button type="button" id="btnAddDriver" class="primary" data-i18n="btn_addDriver"></button>
+          </div>
+          <div class="table-wrap">
+            <table class="table-cities" id="driversTable">
+              <thead>
+                <tr>
+                  <th data-i18n="th_agent"></th>
+                  <th data-i18n="th_driverName"></th>
+                  <th data-i18n="th_car"></th>
+                  <th data-i18n="th_phone"></th>
+                  <th data-i18n="th_cities"></th>
+                  <th data-i18n="th_actions"></th>
+                </tr>
+              </thead>
+              <tbody id="driversTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tabContentItems" class="tab-content" style="display: none;">
+          <div class="dict-buttons" style="margin-bottom: 10px;">
+            <button type="button" id="btnRefreshItems" class="btn-secondary" data-i18n="btn_refresh"></button>
+            <button type="button" id="btnAddItem" class="primary" data-i18n="btn_addItem"></button>
+          </div>
+          <div class="table-wrap">
+            <table class="table-cities" id="itemsTable">
+              <thead>
+                <tr>
+                  <th data-i18n="th_article"></th>
+                  <th data-i18n="th_category"></th>
+                  <th data-i18n="th_actions"></th>
+                </tr>
+              </thead>
+              <tbody id="itemsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div id="cityModal" class="modal" style="display: none;">
+        <div class="modal-content">
+          <h3 id="cityModalTitle"></h3>
+          <input type="hidden" id="cityId" value="0">
+          <div class="field">
+            <label data-i18n="cityModal_name"></label>
+            <input type="text" id="cityName" data-i18n-placeholder="cityModal_namePh" />
+          </div>
+          <div class="field">
+            <label data-i18n="cityModal_code"></label>
+            <input type="text" id="cityCode" data-i18n-placeholder="cityModal_codePh" />
+          </div>
+          <div class="field">
+            <label data-i18n="cityModal_aliases"></label>
+            <input type="text" id="cityAliases" data-i18n-placeholder="cityModal_aliasesPh" />
+          </div>
+          <div class="dict-buttons">
+            <button type="button" id="btnSaveCity" class="primary" data-i18n="btn_save"></button>
+            <button type="button" id="btnCancelCity" class="btn-secondary" data-i18n="btn_cancel"></button>
+          </div>
+        </div>
+      </div>
+
+      <div id="driverModal" class="modal" style="display: none;">
+        <div class="modal-content">
+          <h3 id="driverModalTitle"></h3>
+          <input type="hidden" id="driverOriginalAgent" value="">
+          <div class="field">
+            <label data-i18n="driverModal_agent"></label>
+            <input type="text" id="driverAgent" data-i18n-placeholder="driverModal_agentPh" />
+          </div>
+          <div class="field">
+            <label data-i18n="driverModal_driverName"></label>
+            <input type="text" id="driverName" data-i18n-placeholder="driverModal_driverNamePh" />
+          </div>
+          <div class="field">
+            <label data-i18n="driverModal_car"></label>
+            <input type="text" id="driverCar" data-i18n-placeholder="driverModal_carPh" />
+          </div>
+          <div class="field">
+            <label data-i18n="driverModal_phone"></label>
+            <input type="text" id="driverPhone" placeholder="">
+          </div>
+          <div class="field">
+            <label data-i18n="driverModal_cities"></label>
+            <input type="text" id="driverCities" data-i18n-placeholder="driverModal_citiesPh" />
+          </div>
+          <div class="dict-buttons">
+            <button type="button" id="btnSaveDriver" class="primary" data-i18n="btn_save"></button>
+            <button type="button" id="btnCancelDriver" class="btn-secondary" data-i18n="btn_cancel"></button>
+          </div>
+        </div>
+      </div>
+
+      <div id="itemModal" class="modal" style="display: none;">
+        <div class="modal-content">
+          <h3 id="itemModalTitle"></h3>
+          <input type="hidden" id="itemOriginalCode" value="">
+          <div class="field">
+            <label data-i18n="itemModal_article"></label>
+            <input type="text" id="itemCode" placeholder="">
+          </div>
+          <div class="field">
+            <label data-i18n="itemModal_category"></label>
+            <input type="text" id="itemCategory" data-i18n-placeholder="itemModal_categoryPh" />
+          </div>
+          <div class="dict-buttons">
+            <button type="button" id="btnSaveItem" class="primary" data-i18n="btn_save"></button>
+            <button type="button" id="btnCancelItem" class="btn-secondary" data-i18n="btn_cancel"></button>
+          </div>
+        </div>
+      </div>
+
+      <div id="unresolvedModal" class="modal" style="display: none;">
+        <div class="modal-content modal-unresolved">
+          <h3 data-i18n="unresolved_title"></h3>
+          <p class="dict-desc" data-i18n="unresolved_desc"></p>
+          <div id="unresolvedList" class="unresolved-list"></div>
+          <div class="dict-buttons">
+            <button type="button" id="btnUnresolvedDone" class="primary" data-i18n="unresolved_done"></button>
+          </div>
+        </div>
+      </div>
+
+      <section class="card log">
+        <div class="log-header">
+          <h2 data-i18n="log_title"></h2>
+          <button type="button" id="btnClearLog" class="btn-secondary btn-small" data-i18n="btn_clearLog"></button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

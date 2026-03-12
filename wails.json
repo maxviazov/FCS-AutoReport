@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "fcs-autoreport",
+  "outputfilename": "FCS AutoReport",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "wailsjsdir": "frontend",
+  "info": {
+    "companyName": "FCS",
+    "productName": "FCS AutoReport",
+    "productVersion": "1.0.0",
+    "copyright": "FCS AutoReport — генерация отчётов для Минздрава",
+    "comments": "Собрано с Wails (https://wails.io)"
+  },
+  "nsisType": "multiple"
+}
