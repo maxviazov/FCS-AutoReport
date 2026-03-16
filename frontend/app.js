@@ -8,6 +8,23 @@
   function tr(key) { return window.i18n && window.i18n.t ? window.i18n.t(key) : key; }
   function trParam(key, params) { return window.i18n && window.i18n.tParam ? window.i18n.tParam(key, params) : key; }
 
+  function filterTableBySearch(tbodyId, searchInputId) {
+    var tbody = document.getElementById(tbodyId);
+    var input = document.getElementById(searchInputId);
+    if (!tbody || !input) return;
+    var q = (input.value || "").trim().toLowerCase();
+    var rows = tbody.querySelectorAll("tr");
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (q === "") {
+        row.style.display = "";
+      } else {
+        var text = (row.textContent || "").toLowerCase();
+        row.style.display = text.indexOf(q) !== -1 ? "" : "none";
+      }
+    }
+  }
+
   function log(msg, type) {
     const line = document.createElement("span");
     line.className = type || "";
@@ -181,22 +198,28 @@
           log((e && e.message ? e.message : String(e)), "error");
         }
       }
-      if (typeof backend.GetLastUnresolvedCities === "function") {
-        try {
-          var unresolved = await backend.GetLastUnresolvedCities();
-          if (unresolved && unresolved.length > 0) {
-            showUnresolvedModal(unresolved, backend);
-          }
-        } catch (e) {
-          log((e && e.message ? e.message : String(e)), "error");
-        }
-      }
     } catch (err) {
       const errMsg = err && err.message ? err.message : String(err);
-      log(errMsg, "error");
-      if (generateStatusEl) {
-        generateStatusEl.textContent = errMsg;
-        generateStatusEl.className = "generate-status error";
+      if (errMsg.indexOf("unresolved_cities") !== -1) {
+        log(tr("msg_unresolvedNoSave"), "error");
+        if (generateStatusEl) {
+          generateStatusEl.textContent = tr("msg_unresolvedNoSaveShort");
+          generateStatusEl.className = "generate-status error";
+        }
+        if (typeof backend.GetLastUnresolvedCities === "function") {
+          try {
+            var unresolved = await backend.GetLastUnresolvedCities();
+            if (unresolved && unresolved.length > 0) {
+              showUnresolvedModal(unresolved, backend);
+            }
+          } catch (e) {}
+        }
+      } else {
+        log(errMsg, "error");
+        if (generateStatusEl) {
+          generateStatusEl.textContent = errMsg;
+          generateStatusEl.className = "generate-status error";
+        }
       }
     } finally {
       btnGenerateEl.disabled = false;
@@ -292,6 +315,45 @@
     if (modal) modal.style.display = "none";
   });
 
+  document.getElementById("btnUnresolvedRetry").addEventListener("click", async function () {
+    var backend = getBackend();
+    if (!backend || typeof backend.GenerateReport !== "function") return;
+    var raw = (document.getElementById("rawPath") && document.getElementById("rawPath").value) ? document.getElementById("rawPath").value.trim() : "";
+    var template = (document.getElementById("templatePath") && document.getElementById("templatePath").value) ? document.getElementById("templatePath").value.trim() : "";
+    var output = (document.getElementById("outputDir") && document.getElementById("outputDir").value) ? document.getElementById("outputDir").value.trim() : "";
+    if (!raw || !template || !output) {
+      log(tr("msg_fillPathsShort"), "error");
+      return;
+    }
+    var btn = document.getElementById("btnUnresolvedRetry");
+    if (btn) btn.disabled = true;
+    try {
+      var savedPath = await backend.GenerateReport(raw, template, output);
+      log(tr("msg_done") + ": " + savedPath, "success");
+      setLastReportPath(savedPath);
+      if (generateStatusEl) {
+        generateStatusEl.textContent = tr("msg_done") + ": " + savedPath;
+        generateStatusEl.className = "generate-status";
+      }
+      if (typeof backend.OpenFileLocation === "function") {
+        try { await backend.OpenFileLocation(savedPath); } catch (e) {}
+      }
+      var modal = document.getElementById("unresolvedModal");
+      if (modal) modal.style.display = "none";
+    } catch (err) {
+      var errMsg = err && err.message ? err.message : String(err);
+      log(errMsg, "error");
+      if (errMsg.indexOf("unresolved_cities") !== -1 && typeof backend.GetLastUnresolvedCities === "function") {
+        try {
+          var unresolved = await backend.GetLastUnresolvedCities();
+          if (unresolved && unresolved.length > 0) showUnresolvedModal(unresolved, backend);
+        } catch (e) {}
+      }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
   document.getElementById("unresolvedModal").addEventListener("click", function (e) {
     if (e.target.id === "unresolvedModal") e.target.style.display = "none";
   });
@@ -365,12 +427,13 @@
             log(tr("msg_cityDeleted"), "success");
             loadCitiesTable();
           }).catch(function (e) {
-            log("Ошибка удаления: " + (e && e.message ? e.message : String(e)), "error");
+            log((e && e.message ? e.message : String(e)), "error");
           });
         });
       });
+      filterTableBySearch("citiesTbody", "searchCities");
     } catch (e) {
-      log("Ошибка загрузки городов: " + (e && e.message ? e.message : String(e)), "error");
+      log((e && e.message ? e.message : String(e)), "error");
     }
   }
 
@@ -433,6 +496,17 @@
       btn.classList.toggle("active", id === "tabBtn" + tabName);
       btn.classList.toggle("tab-btn-active", id === "tabBtn" + tabName);
     });
+  }
+
+  var searchCitiesEl = document.getElementById("searchCities");
+  if (searchCitiesEl) {
+    searchCitiesEl.addEventListener("input", function () { filterTableBySearch("citiesTbody", "searchCities"); });
+    searchCitiesEl.addEventListener("change", function () { filterTableBySearch("citiesTbody", "searchCities"); });
+  }
+  var searchDriversEl = document.getElementById("searchDrivers");
+  if (searchDriversEl) {
+    searchDriversEl.addEventListener("input", function () { filterTableBySearch("driversTbody", "searchDrivers"); });
+    searchDriversEl.addEventListener("change", function () { filterTableBySearch("driversTbody", "searchDrivers"); });
   }
 
   document.getElementById("tabBtnCities").addEventListener("click", function () { switchTab("Cities"); });
@@ -498,8 +572,9 @@
           });
         });
       });
+      filterTableBySearch("driversTbody", "searchDrivers");
     } catch (e) {
-      log("Ошибка загрузки водителей: " + (e && e.message ? e.message : String(e)), "error");
+      log((e && e.message ? e.message : String(e)), "error");
     }
   }
 

@@ -70,6 +70,9 @@
 
         <div id="tabContentCities" class="tab-content">
           <p class="dict-desc" data-i18n="cities_desc"></p>
+          <div class="search-row">
+            <input type="text" id="searchCities" class="search-input" data-i18n-placeholder="search_placeholder" />
+          </div>
           <div class="dict-buttons" style="margin-bottom: 10px;">
             <button type="button" id="btnRefreshCities" class="btn-secondary" data-i18n="btn_refresh"></button>
             <button type="button" id="btnAddCity" class="primary" data-i18n="btn_addCity"></button>
@@ -91,6 +94,9 @@
         </div>
 
         <div id="tabContentDrivers" class="tab-content" style="display: none;">
+          <div class="search-row">
+            <input type="text" id="searchDrivers" class="search-input" data-i18n-placeholder="search_placeholder" />
+          </div>
           <div class="dict-buttons" style="margin-bottom: 10px;">
             <button type="button" id="btnRefreshDrivers" class="btn-secondary" data-i18n="btn_refresh"></button>
             <button type="button" id="btnAddDriver" class="primary" data-i18n="btn_addDriver"></button>
@@ -211,7 +217,8 @@
           <p class="dict-desc" data-i18n="unresolved_desc"></p>
           <div id="unresolvedList" class="unresolved-list"></div>
           <div class="dict-buttons">
-            <button type="button" id="btnUnresolvedDone" class="primary" data-i18n="unresolved_done"></button>
+            <button type="button" id="btnUnresolvedRetry" class="primary" data-i18n="unresolved_retry"></button>
+            <button type="button" id="btnUnresolvedDone" class="btn-secondary" data-i18n="unresolved_done"></button>
           </div>
         </div>
       </div>

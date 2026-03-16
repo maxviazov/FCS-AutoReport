@@ -616,3 +616,16 @@ header h1 {
   border-radius: var(--radius);
   border: 1px solid var(--border-subtle);
 }
+
+.search-row {
+  margin-bottom: 0.75rem;
+}
+
+.search-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.95rem;
+}

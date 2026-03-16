@@ -1,6 +1,9 @@
 # Build
 build/
 bin/
+
+# Generated reports (не коммитить в репозиторий)
+FCS_Report_*.xlsx
 *.exe
 *.dll
 *.so
