@@ -111,6 +111,7 @@
       unresolved_create: "Создать запись",
       msg_unresolvedNoSave: "Есть города без кода. Добавьте алиасы и нажмите «Повторить генерацию». Отчёт не сохранён.",
       msg_unresolvedNoSaveShort: "Добавьте алиасы для городов без кода.",
+      msg_unresolvedHint: "Добавьте города/алиасы во вкладке «Города» и нажмите «Повторить генерацию».",
       search_placeholder: "Поиск по любому полю...",
     },
     en: {
@@ -223,6 +224,7 @@
       unresolved_create: "Create entry",
       msg_unresolvedNoSave: "Some cities have no code. Add aliases and click «Retry generation». Report not saved.",
       msg_unresolvedNoSaveShort: "Add aliases for cities without code.",
+      msg_unresolvedHint: "Add cities/aliases in the Cities tab and click «Retry generation».",
       search_placeholder: "Search any field...",
     },
     he: {
@@ -335,6 +337,7 @@
       unresolved_create: "צור רשומה",
       msg_unresolvedNoSave: "יש ערים ללא קוד. הוסף כינויים ולחץ «צור דוח שוב». הדוח לא נשמר.",
       msg_unresolvedNoSaveShort: "הוסף כינויים לערים ללא קוד.",
+      msg_unresolvedHint: "הוסף ערים/כינויים בלשונית «ערים» ולחץ «צור דוח שוב».",
       search_placeholder: "חיפוש בכל שדה...",
     },
   };

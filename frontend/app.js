@@ -206,14 +206,14 @@
           generateStatusEl.textContent = tr("msg_unresolvedNoSaveShort");
           generateStatusEl.className = "generate-status error";
         }
+        var unresolved = [];
         if (typeof backend.GetLastUnresolvedCities === "function") {
           try {
-            var unresolved = await backend.GetLastUnresolvedCities();
-            if (unresolved && unresolved.length > 0) {
-              showUnresolvedModal(unresolved, backend);
-            }
+            var list = await backend.GetLastUnresolvedCities();
+            if (list && list.length) unresolved = list;
           } catch (e) {}
         }
+        showUnresolvedModal(unresolved, backend);
       } else {
         log(errMsg, "error");
         if (generateStatusEl) {
@@ -240,13 +240,20 @@
     var listEl = document.getElementById("unresolvedList");
     if (!modal || !listEl) return;
     listEl.innerHTML = "";
+    if (!unresolved || unresolved.length === 0) {
+      var hint = document.createElement("p");
+      hint.className = "dict-desc";
+      hint.style.marginBottom = "1rem";
+      hint.textContent = tr("msg_unresolvedHint") || "Добавьте города/алиасы во вкладке «Города» и нажмите «Повторить генерацию».";
+      listEl.appendChild(hint);
+    }
     var cities = [];
     if (typeof backend.GetCities === "function") {
       try {
         cities = await backend.GetCities();
       } catch (e) {}
     }
-    unresolved.forEach(function (name) {
+    (unresolved || []).forEach(function (name) {
       var row = document.createElement("div");
       row.className = "unresolved-row";
       row.setAttribute("data-name", name);
