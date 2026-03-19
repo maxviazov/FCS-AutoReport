@@ -246,16 +246,20 @@ func (a *WailsApp) AddCityAlias(cityID int, alias string) error {
 		return fmt.Errorf("город с ID %d не найден", cityID)
 	}
 	aliasNorm := domain.NormalizeText(alias)
+	if aliasNorm == "" {
+		return fmt.Errorf("алиас после нормализации пустой")
+	}
 	for _, existing := range city.Aliases {
 		if domain.NormalizeText(existing) == aliasNorm {
-			// уже есть
+			// уже есть — всё равно перезагружаем кэш
 			if err := a.service.LoadDictionariesToMemory(); err != nil {
 				return err
 			}
 			return nil
 		}
 	}
-	city.Aliases = append(city.Aliases, alias)
+	// сохраняем нормализованную форму, чтобы поиск из сырого файла (тоже нормализованный) совпадал
+	city.Aliases = append(city.Aliases, aliasNorm)
 	if err := a.service.DB().UpdateCity(city); err != nil {
 		return fmt.Errorf("обновление города: %w", err)
 	}
