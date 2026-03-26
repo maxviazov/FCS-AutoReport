@@ -73,12 +73,7 @@ func (a *WailsApp) GenerateReport(rawFilePath, templatePath, outputDir string) (
 	}
 	a.service.SetLastUnresolvedCities(invoices)
 
-	for _, inv := range invoices {
-		if inv.CityCode == "" {
-			return "", fmt.Errorf("unresolved_cities: добавьте алиасы для городов без кода; отчёт не сохранён")
-		}
-	}
-
+	// Отчёт сохраняется всегда; строки без кода города — с пустыми полями города/водителя.
 	savedPath, err := ExportToExcel(invoices, templatePath, outputDir)
 	if err != nil {
 		return "", fmt.Errorf("сохранение отчёта: %w", err)
