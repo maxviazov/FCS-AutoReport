@@ -85,6 +85,50 @@ func SendReport(settings domain.Settings, reportPath string) (string, error) {
 	return subject, nil
 }
 
+func TestSMTP(settings domain.Settings) error {
+	missing := make([]string, 0, 4)
+	if strings.TrimSpace(settings.SMTPHost) == "" {
+		missing = append(missing, "SMTPHost")
+	}
+	if strings.TrimSpace(settings.SMTPUser) == "" {
+		missing = append(missing, "SMTPUser")
+	}
+	if strings.TrimSpace(settings.SMTPPassword) == "" {
+		missing = append(missing, "SMTPPassword")
+	}
+	if settings.SMTPPort <= 0 {
+		missing = append(missing, "SMTPPort")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("smtp не настроен: отсутствуют поля %s", strings.Join(missing, ", "))
+	}
+
+	addr := fmt.Sprintf("%s:%d", settings.SMTPHost, settings.SMTPPort)
+	if settings.SMTPPort == 465 {
+		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: settings.SMTPHost})
+		if err != nil {
+			return fmt.Errorf("smtp tls dial: %w", err)
+		}
+		_ = conn.Close()
+		return nil
+	}
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial: %w", err)
+	}
+	defer c.Close()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: settings.SMTPHost}); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
+	auth := smtp.PlainAuth("", settings.SMTPUser, settings.SMTPPassword, settings.SMTPHost)
+	if err := c.Auth(auth); err != nil {
+		return fmt.Errorf("smtp auth: %w", err)
+	}
+	return nil
+}
+
 func sendTLS(addr, host, user, pass string, recipients []string, msg []byte) error {
 	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host})
 	if err != nil {

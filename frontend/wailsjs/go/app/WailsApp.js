@@ -121,3 +121,7 @@ export function SelectTemplate() {
 export function SendReportNow(arg1) {
   return window['go']['app']['WailsApp']['SendReportNow'](arg1);
 }
+
+export function TestMailConnections() {
+  return window['go']['app']['WailsApp']['TestMailConnections']();
+}

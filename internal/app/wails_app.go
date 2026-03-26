@@ -51,7 +51,7 @@ func (a *WailsApp) SaveSettings(inputFolder, outputFolder, templatePath string) 
 		OutputFolder: outputFolder,
 		TemplatePath: templatePath,
 	}
-	if err := a.service.DB().SaveSettings(s); err != nil {
+	if err := a.service.DB().SavePaths(inputFolder, outputFolder, templatePath); err != nil {
 		return fmt.Errorf("сохранение настроек: %w", err)
 	}
 	a.service.Store().SetSettings(s)
@@ -371,4 +371,9 @@ func (a *WailsApp) PollRepliesNowWithCount() (int, error) {
 
 func (a *WailsApp) ResetSentRowsCounter() error {
 	return a.service.ResetSentRowsCounter()
+}
+
+func (a *WailsApp) TestMailConnections() error {
+	slog.Info("TestMailConnections вызван")
+	return a.service.TestMailConnections()
 }

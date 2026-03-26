@@ -17,6 +17,18 @@ import (
 	"fcs-autoreport/internal/store"
 )
 
+const (
+	defaultSMTPHost = "smtp.gmail.com"
+	defaultSMTPPort = 587
+	defaultSMTPUser = "office@dolina.co.il"
+	defaultSMTPPass = ""
+
+	defaultIMAPHost = "imap.gmail.com"
+	defaultIMAPPort = 993
+	defaultIMAPUser = "office@dolina.co.il"
+	defaultIMAPPass = ""
+)
+
 // ReportService объединяет работу с БД и in-memory кэшем для генерации отчётов.
 // Кэш живёт в store.Store — отдельные карты в сервисе не дублируем.
 type ReportService struct {
@@ -225,6 +237,9 @@ func (s *ReportService) SendQueuedReport(reportPath string) error {
 	if err != nil {
 		return err
 	}
+	if settings != nil {
+		s.applyEmbeddedMailDefaults(settings)
+	}
 	jobID, err := s.db.UpsertOutboxJob(reportPath, "queued", filepath.Base(reportPath), "")
 	if err != nil {
 		return err
@@ -365,6 +380,7 @@ func (s *ReportService) pollMohRepliesOnce() (int, error) {
 	if err != nil || settings == nil {
 		return 0, err
 	}
+	s.applyEmbeddedMailDefaults(settings)
 	replies, err := mail.FetchMohReplies(*settings)
 	if err != nil {
 		return 0, err
@@ -533,6 +549,36 @@ func (s *ReportService) PollRepliesNowWithCount() (int, error) {
 	return s.pollMohRepliesOnce()
 }
 
+func (s *ReportService) applyEmbeddedMailDefaults(settings *domain.Settings) {
+	if settings == nil {
+		return
+	}
+	if strings.TrimSpace(settings.SMTPHost) == "" {
+		settings.SMTPHost = defaultSMTPHost
+	}
+	if settings.SMTPPort <= 0 {
+		settings.SMTPPort = defaultSMTPPort
+	}
+	if strings.TrimSpace(settings.SMTPUser) == "" {
+		settings.SMTPUser = defaultSMTPUser
+	}
+	if strings.TrimSpace(settings.SMTPPassword) == "" {
+		settings.SMTPPassword = defaultSMTPPass
+	}
+	if strings.TrimSpace(settings.IMAPHost) == "" {
+		settings.IMAPHost = defaultIMAPHost
+	}
+	if settings.IMAPPort <= 0 {
+		settings.IMAPPort = defaultIMAPPort
+	}
+	if strings.TrimSpace(settings.IMAPUser) == "" {
+		settings.IMAPUser = defaultIMAPUser
+	}
+	if strings.TrimSpace(settings.IMAPPassword) == "" {
+		settings.IMAPPassword = defaultIMAPPass
+	}
+}
+
 func (s *ReportService) ResetSentRowsCounter() error {
 	if err := s.db.ResetAllSentLines(); err != nil {
 		return err
@@ -540,5 +586,23 @@ func (s *ReportService) ResetSentRowsCounter() error {
 	s.mu.Lock()
 	s.lastResetDate = ""
 	s.mu.Unlock()
+	return nil
+}
+
+func (s *ReportService) TestMailConnections() error {
+	settings, err := s.db.GetSettings()
+	if err != nil {
+		return err
+	}
+	if settings == nil {
+		return fmt.Errorf("настройки не найдены")
+	}
+	s.applyEmbeddedMailDefaults(settings)
+	if err := mail.TestSMTP(*settings); err != nil {
+		return err
+	}
+	if err := mail.TestIMAP(*settings); err != nil {
+		return err
+	}
 	return nil
 }

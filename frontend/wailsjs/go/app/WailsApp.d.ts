@@ -61,3 +61,5 @@ export function SelectRawReport():Promise<string>;
 export function SelectTemplate():Promise<string>;
 
 export function SendReportNow(arg1:string):Promise<void>;
+
+export function TestMailConnections():Promise<void>;

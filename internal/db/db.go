@@ -186,6 +186,17 @@ func (db *DB) SaveSettings(s *domain.Settings) error {
 	return err
 }
 
+// SavePaths обновляет только пути генерации, не затрагивая SMTP/IMAP и automation-поля.
+func (db *DB) SavePaths(inputFolder, outputFolder, templatePath string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	_, err := db.conn.Exec(
+		`UPDATE settings SET raw_reports_path = ?, output_path = ?, template_path = ? WHERE id = 1`,
+		inputFolder, outputFolder, templatePath,
+	)
+	return err
+}
+
 func boolToInt(v bool) int {
 	if v {
 		return 1

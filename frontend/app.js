@@ -906,6 +906,24 @@
     });
   }
 
+  var btnTestMailConnections = document.getElementById("btnTestMailConnections");
+  if (btnTestMailConnections) {
+    btnTestMailConnections.addEventListener("click", async function () {
+      const backend = getBackend();
+      if (!backend || typeof backend.TestMailConnections !== "function") {
+        log("Проверка SMTP/IMAP недоступна: метод backend не найден.", "error");
+        return;
+      }
+      log("Проверка SMTP/IMAP: запуск...", "success");
+      try {
+        await backend.TestMailConnections();
+        log("SMTP/IMAP: подключение успешно.", "success");
+      } catch (e) {
+        log((e && e.message ? e.message : String(e)), "error");
+      }
+    });
+  }
+
   var btnScanWatchNow = document.getElementById("btnScanWatchNow");
   if (btnScanWatchNow) {
     btnScanWatchNow.addEventListener("click", async function () {

@@ -87,6 +87,26 @@ func FetchMohReplies(settings domain.Settings) ([]ReceivedReply, error) {
 	return out, nil
 }
 
+func TestIMAP(settings domain.Settings) error {
+	if settings.IMAPHost == "" || settings.IMAPUser == "" || settings.IMAPPassword == "" || settings.IMAPPort <= 0 {
+		return fmt.Errorf("imap не настроен: проверьте host/port/user/password")
+	}
+	addr := settings.IMAPHost + ":" + strconvI(settings.IMAPPort)
+	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: settings.IMAPHost})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+	bw := bufio.NewWriter(conn)
+	_, _ = br.ReadString('\n')
+	if _, err := imapCmd(br, bw, `LOGIN "%s" "%s"`, escIMAP(settings.IMAPUser), escIMAP(settings.IMAPPassword)); err != nil {
+		return err
+	}
+	_, _ = imapCmd(br, bw, "LOGOUT")
+	return nil
+}
+
 func parseRawMail(raw []byte) (ReceivedReply, error) {
 	r, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
