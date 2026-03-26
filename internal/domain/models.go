@@ -19,6 +19,17 @@ type Settings struct {
 	InputFolder  string `json:"inputFolder"`  // Путь к сырому отчёту или папка
 	OutputFolder string `json:"outputFolder"` // Папка сохранения отчётов
 	TemplatePath string `json:"templatePath"` // Путь к шаблону Минздрава
+	SMTPHost     string `json:"smtpHost"`
+	SMTPPort     int    `json:"smtpPort"`
+	SMTPUser     string `json:"smtpUser"`
+	SMTPPassword string `json:"smtpPassword"`
+	IMAPHost     string `json:"imapHost"`
+	IMAPPort     int    `json:"imapPort"`
+	IMAPUser     string `json:"imapUser"`
+	IMAPPassword string `json:"imapPassword"`
+	AutoSend     bool   `json:"autoSend"`
+	WatchEnabled bool   `json:"watchEnabled"`
+	WatchFolder  string `json:"watchFolder"`
 }
 
 // Client описывает клиента для подстановки кода города
@@ -69,4 +80,24 @@ type AggregatedInvoice struct {
 // HasErrors возвращает true, если при сборке накладной были проблемы.
 func (a *AggregatedInvoice) HasErrors() bool {
 	return len(a.Errors) > 0
+}
+
+type OutboxJob struct {
+	ID          int    `json:"id"`
+	ReportPath  string `json:"reportPath"`
+	Status      string `json:"status"`
+	Error       string `json:"error"`
+	SentAt      string `json:"sentAt"`
+	ReplyAt     string `json:"replyAt"`
+	SubjectHint string `json:"subjectHint"`
+}
+
+type ApprovalResult struct {
+	JobID        int    `json:"jobId"`
+	InvoiceNum   string `json:"invoiceNum"`
+	ClientName   string `json:"clientName"`
+	ClientHP     string `json:"clientHP"`
+	ApprovalNum  string `json:"approvalNum"`
+	Status       string `json:"status"` // approved | rejected
+	RejectReason string `json:"rejectReason"`
 }

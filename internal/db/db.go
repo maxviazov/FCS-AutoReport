@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"fcs-autoreport/internal/domain"
 
@@ -68,6 +69,17 @@ func (db *DB) migrate() error {
 	}
 	// Миграция: добавить city_codes водителям (для существующих БД)
 	_, _ = db.conn.Exec(`ALTER TABLE drivers ADD COLUMN city_codes TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN smtp_host TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN smtp_port INTEGER NOT NULL DEFAULT 587`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN smtp_user TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN smtp_password TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN imap_host TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN imap_port INTEGER NOT NULL DEFAULT 993`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN imap_user TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN imap_password TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN auto_send INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN watch_folder TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -139,15 +151,24 @@ func (db *DB) GetSettings() (*domain.Settings, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	var s domain.Settings
+	var autoSend int
+	var watchEnabled int
 	err := db.conn.QueryRow(
-		`SELECT raw_reports_path, output_path, template_path FROM settings WHERE id = 1`,
-	).Scan(&s.InputFolder, &s.OutputFolder, &s.TemplatePath)
+		`SELECT raw_reports_path, output_path, template_path, smtp_host, smtp_port, smtp_user, smtp_password, imap_host, imap_port, imap_user, imap_password, auto_send, watch_enabled, watch_folder FROM settings WHERE id = 1`,
+	).Scan(
+		&s.InputFolder, &s.OutputFolder, &s.TemplatePath,
+		&s.SMTPHost, &s.SMTPPort, &s.SMTPUser, &s.SMTPPassword,
+		&s.IMAPHost, &s.IMAPPort, &s.IMAPUser, &s.IMAPPassword,
+		&autoSend, &watchEnabled, &s.WatchFolder,
+	)
 	if err == sql.ErrNoRows {
 		return &domain.Settings{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
 	}
+	s.AutoSend = autoSend == 1
+	s.WatchEnabled = watchEnabled == 1
 	return &s, nil
 }
 
@@ -156,8 +177,191 @@ func (db *DB) SaveSettings(s *domain.Settings) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	_, err := db.conn.Exec(
-		`UPDATE settings SET raw_reports_path = ?, output_path = ?, template_path = ? WHERE id = 1`,
+		`UPDATE settings SET raw_reports_path = ?, output_path = ?, template_path = ?, smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_password = ?, imap_host = ?, imap_port = ?, imap_user = ?, imap_password = ?, auto_send = ?, watch_enabled = ?, watch_folder = ? WHERE id = 1`,
 		s.InputFolder, s.OutputFolder, s.TemplatePath,
+		s.SMTPHost, s.SMTPPort, s.SMTPUser, s.SMTPPassword,
+		s.IMAPHost, s.IMAPPort, s.IMAPUser, s.IMAPPassword,
+		boolToInt(s.AutoSend), boolToInt(s.WatchEnabled), s.WatchFolder,
+	)
+	return err
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func (db *DB) MarkSentLine(businessDate, dedupKey, invoiceNum, clientName, clientHP, reportPath string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	_, err := db.conn.Exec(
+		`INSERT OR IGNORE INTO daily_sent_lines (business_date, dedup_key, invoice_num, client_name, client_hp, report_path, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		businessDate, dedupKey, invoiceNum, clientName, clientHP, reportPath, time.Now().Format(time.RFC3339),
+	)
+	return err
+}
+
+func (db *DB) ExistsSentLine(businessDate, dedupKey string) (bool, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	var n int
+	if err := db.conn.QueryRow(`SELECT COUNT(1) FROM daily_sent_lines WHERE business_date = ? AND dedup_key = ?`, businessDate, dedupKey).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (db *DB) ResetDailySentForDate(businessDate string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	_, err := db.conn.Exec(`DELETE FROM daily_sent_lines WHERE business_date <> ?`, businessDate)
+	return err
+}
+
+func (db *DB) ResetAllSentLines() error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	_, err := db.conn.Exec(`DELETE FROM daily_sent_lines`)
+	return err
+}
+
+func (db *DB) UpsertOutboxJob(reportPath, status, subjectHint, errMsg string) (int, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	now := time.Now().Format(time.RFC3339)
+	_, err := db.conn.Exec(
+		`INSERT INTO outbox_jobs (report_path, status, error, subject_hint, created_at) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(report_path) DO UPDATE SET status = excluded.status, error = excluded.error, subject_hint = excluded.subject_hint`,
+		reportPath, status, errMsg, subjectHint, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	var id int
+	if err := db.conn.QueryRow(`SELECT id FROM outbox_jobs WHERE report_path = ?`, reportPath).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (db *DB) UpdateOutboxJobStatus(id int, status, errMsg string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	now := time.Now().Format(time.RFC3339)
+	_, err := db.conn.Exec(`UPDATE outbox_jobs SET status = ?, error = ?, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END, reply_at = CASE WHEN ? = 'replied' THEN ? ELSE reply_at END WHERE id = ?`,
+		status, errMsg, status, now, status, now, id)
+	return err
+}
+
+func (db *DB) ListOutboxJobs(limit int) ([]domain.OutboxJob, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.conn.Query(`SELECT id, report_path, status, error, sent_at, reply_at, subject_hint FROM outbox_jobs ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.OutboxJob
+	for rows.Next() {
+		var it domain.OutboxJob
+		if err := rows.Scan(&it.ID, &it.ReportPath, &it.Status, &it.Error, &it.SentAt, &it.ReplyAt, &it.SubjectHint); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) ListOutboxJobsByStatus(status string, limit int) ([]domain.OutboxJob, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.conn.Query(`SELECT id, report_path, status, error, sent_at, reply_at, subject_hint FROM outbox_jobs WHERE status = ? ORDER BY id DESC LIMIT ?`, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.OutboxJob
+	for rows.Next() {
+		var it domain.OutboxJob
+		if err := rows.Scan(&it.ID, &it.ReportPath, &it.Status, &it.Error, &it.SentAt, &it.ReplyAt, &it.SubjectHint); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) ReplaceApprovalResults(jobID int, rowsIn []domain.ApprovalResult) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM approval_results WHERE job_id = ?`, jobID); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO approval_results (job_id, invoice_num, client_name, client_hp, approval_num, status, reject_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().Format(time.RFC3339)
+	for _, r := range rowsIn {
+		if _, err := stmt.Exec(jobID, r.InvoiceNum, r.ClientName, r.ClientHP, r.ApprovalNum, r.Status, r.RejectReason, now); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (db *DB) ListApprovalResults(jobID int) ([]domain.ApprovalResult, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	rows, err := db.conn.Query(`SELECT job_id, invoice_num, client_name, client_hp, approval_num, status, reject_reason FROM approval_results WHERE job_id = ? ORDER BY id`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ApprovalResult
+	for rows.Next() {
+		var r domain.ApprovalResult
+		if err := rows.Scan(&r.JobID, &r.InvoiceNum, &r.ClientName, &r.ClientHP, &r.ApprovalNum, &r.Status, &r.RejectReason); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) IsFileProcessed(path string) (bool, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	var n int
+	if err := db.conn.QueryRow(`SELECT COUNT(1) FROM processed_files WHERE file_path = ?`, path).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (db *DB) MarkFileProcessed(path, kind, status string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	_, err := db.conn.Exec(
+		`INSERT INTO processed_files (file_path, kind, processed_at, status) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(file_path) DO UPDATE SET kind = excluded.kind, processed_at = excluded.processed_at, status = excluded.status`,
+		path, kind, time.Now().Format(time.RFC3339), status,
 	)
 	return err
 }

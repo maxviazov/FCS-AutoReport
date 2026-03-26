@@ -48,6 +48,11 @@
           <button type="button" id="btnOpenReportFolder" class="btn-secondary" style="display: none;" data-i18n="reportGen_btnOpenFolder"></button>
           <span id="generateStatus" class="generate-status" aria-live="polite"></span>
         </div>
+        <div class="dict-buttons">
+          <button type="button" id="btnQuickSendNow" class="btn-secondary" data-i18n="approval_sendNow"></button>
+          <button type="button" id="btnQuickPollReplies" class="btn-secondary" data-i18n="approval_pollReplies"></button>
+          <button type="button" id="btnQuickResetSentRows" class="btn-secondary" data-i18n="automation_resetSentRows"></button>
+        </div>
       </section>
 
       <section class="card dictionaries-section">
@@ -216,12 +221,106 @@
           <h3 data-i18n="unresolved_title"></h3>
           <p class="dict-desc" data-i18n="unresolved_desc"></p>
           <div id="unresolvedList" class="unresolved-list"></div>
+          <p id="unresolvedRetryStatus" class="unresolved-retry-status" aria-live="polite"></p>
           <div class="dict-buttons">
             <button type="button" id="btnUnresolvedRetry" class="primary" data-i18n="unresolved_retry"></button>
             <button type="button" id="btnUnresolvedDone" class="btn-secondary" data-i18n="unresolved_done"></button>
           </div>
         </div>
       </div>
+
+      <section class="card">
+        <h2 data-i18n="automation_title"></h2>
+        <div class="field">
+          <label data-i18n="automation_smtpHost"></label>
+          <input type="text" id="smtpHost" placeholder="smtp.gmail.com" />
+          <input type="text" id="smtpPort" placeholder="587" />
+        </div>
+        <div class="field">
+          <label data-i18n="automation_smtpUser"></label>
+          <input type="text" id="smtpUser" placeholder="user@example.com" />
+          <input type="password" id="smtpPassword" placeholder="app password" />
+        </div>
+        <div class="field">
+          <label data-i18n="automation_imapHost"></label>
+          <input type="text" id="imapHost" placeholder="imap.gmail.com" />
+          <input type="text" id="imapPort" placeholder="993" />
+        </div>
+        <div class="field">
+          <label data-i18n="automation_imapUser"></label>
+          <input type="text" id="imapUser" placeholder="user@example.com" />
+          <input type="password" id="imapPassword" placeholder="app password" />
+        </div>
+        <div class="field">
+          <label data-i18n="automation_watchFolder"></label>
+          <input type="text" id="watchFolder" data-i18n-placeholder="reportGen_outputPlaceholder" />
+          <button type="button" id="btnWatchFolder" data-i18n="btn_select"></button>
+        </div>
+        <div class="dict-buttons">
+          <label><input type="checkbox" id="autoSendEnabled" /> <span data-i18n="automation_autoSend"></span></label>
+          <label><input type="checkbox" id="watchEnabled" /> <span data-i18n="automation_watchEnabled"></span></label>
+          <button type="button" id="btnSaveAutomation" class="primary" data-i18n="automation_save"></button>
+          <button type="button" id="btnScanWatchNow" class="btn-secondary" data-i18n="automation_scanNow"></button>
+          <button type="button" id="btnResetSentRows" class="btn-secondary" data-i18n="automation_resetSentRows"></button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 data-i18n="approval_title"></h2>
+        <div class="dict-buttons" style="margin-bottom: 10px;">
+          <button type="button" id="btnRefreshOutbox" class="btn-secondary" data-i18n="approval_refresh"></button>
+          <button type="button" id="btnSendSelectedNow" class="btn-secondary" data-i18n="approval_sendNow"></button>
+          <button type="button" id="btnPollRepliesNow" class="btn-secondary" data-i18n="approval_pollReplies"></button>
+          <button type="button" id="btnApplyReplyText" class="btn-secondary" data-i18n="approval_applyReply"></button>
+        </div>
+        <div class="field">
+          <label data-i18n="approval_replyText"></label>
+          <input type="text" id="replyTextInput" data-i18n-placeholder="approval_replyPlaceholder" />
+        </div>
+        <div class="table-wrap">
+          <table class="table-cities">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th data-i18n="approval_report"></th>
+                <th data-i18n="approval_status"></th>
+                <th data-i18n="approval_error"></th>
+              </tr>
+            </thead>
+            <tbody id="outboxTbody"></tbody>
+          </table>
+        </div>
+
+        <h3 data-i18n="approval_approved"></h3>
+        <div class="table-wrap">
+          <table class="table-cities">
+            <thead>
+              <tr>
+                <th data-i18n="approval_client"></th>
+                <th data-i18n="approval_hp"></th>
+                <th data-i18n="approval_invoice"></th>
+                <th data-i18n="approval_approvalNum"></th>
+              </tr>
+            </thead>
+            <tbody id="approvedTbody"></tbody>
+          </table>
+        </div>
+
+        <h3 data-i18n="approval_rejected"></h3>
+        <div class="table-wrap">
+          <table class="table-cities">
+            <thead>
+              <tr>
+                <th data-i18n="approval_client"></th>
+                <th data-i18n="approval_hp"></th>
+                <th data-i18n="approval_invoice"></th>
+                <th data-i18n="approval_reason"></th>
+              </tr>
+            </thead>
+            <tbody id="rejectedTbody"></tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="card log">
         <div class="log-header">

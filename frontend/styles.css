@@ -584,6 +584,17 @@ header h1 {
   margin: 1rem 0;
 }
 
+.unresolved-retry-status {
+  margin: 0.5rem 0 0;
+  min-height: 1.2em;
+  font-size: 0.9rem;
+}
+
+.unresolved-retry-status.error {
+  color: var(--color-error, #c0392b);
+  font-weight: 600;
+}
+
 .unresolved-row {
   display: flex;
   flex-wrap: wrap;

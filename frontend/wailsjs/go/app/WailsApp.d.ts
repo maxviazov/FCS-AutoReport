@@ -4,6 +4,8 @@ import {domain} from '../models';
 
 export function AddCityAlias(arg1:number,arg2:string):Promise<void>;
 
+export function ApplyReplyForJob(arg1:number,arg2:string,arg3:string):Promise<void>;
+
 export function DeleteCity(arg1:number):Promise<void>;
 
 export function DeleteDriver(arg1:string):Promise<void>;
@@ -12,6 +14,8 @@ export function DeleteItem(arg1:string):Promise<void>;
 
 export function GenerateReport(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function GetApprovalResults(arg1:number):Promise<Array<domain.ApprovalResult>>;
+
 export function GetCities():Promise<Array<domain.City>>;
 
 export function GetDrivers():Promise<Array<domain.Driver>>;
@@ -19,6 +23,8 @@ export function GetDrivers():Promise<Array<domain.Driver>>;
 export function GetItems():Promise<Array<domain.Item>>;
 
 export function GetLastUnresolvedCities():Promise<Array<string>>;
+
+export function GetOutboxJobs(arg1:number):Promise<Array<domain.OutboxJob>>;
 
 export function GetSettings():Promise<domain.Settings>;
 
@@ -29,6 +35,16 @@ export function ImportDriversDict():Promise<string>;
 export function ImportItemsDict():Promise<string>;
 
 export function OpenFileLocation(arg1:string):Promise<void>;
+
+export function PollRepliesNow():Promise<void>;
+
+export function PollRepliesNowWithCount():Promise<number>;
+
+export function ProcessWatchFolderNow():Promise<void>;
+
+export function ResetSentRowsCounter():Promise<void>;
+
+export function SaveAutomationSettings(arg1:domain.Settings):Promise<void>;
 
 export function SaveCity(arg1:domain.City):Promise<void>;
 
@@ -43,3 +59,5 @@ export function SelectOutputDir():Promise<string>;
 export function SelectRawReport():Promise<string>;
 
 export function SelectTemplate():Promise<string>;
+
+export function SendReportNow(arg1:string):Promise<void>;

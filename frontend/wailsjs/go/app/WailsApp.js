@@ -6,6 +6,10 @@ export function AddCityAlias(arg1, arg2) {
   return window['go']['app']['WailsApp']['AddCityAlias'](arg1, arg2);
 }
 
+export function ApplyReplyForJob(arg1, arg2, arg3) {
+  return window['go']['app']['WailsApp']['ApplyReplyForJob'](arg1, arg2, arg3);
+}
+
 export function DeleteCity(arg1) {
   return window['go']['app']['WailsApp']['DeleteCity'](arg1);
 }
@@ -22,6 +26,10 @@ export function GenerateReport(arg1, arg2, arg3) {
   return window['go']['app']['WailsApp']['GenerateReport'](arg1, arg2, arg3);
 }
 
+export function GetApprovalResults(arg1) {
+  return window['go']['app']['WailsApp']['GetApprovalResults'](arg1);
+}
+
 export function GetCities() {
   return window['go']['app']['WailsApp']['GetCities']();
 }
@@ -36,6 +44,10 @@ export function GetItems() {
 
 export function GetLastUnresolvedCities() {
   return window['go']['app']['WailsApp']['GetLastUnresolvedCities']();
+}
+
+export function GetOutboxJobs(arg1) {
+  return window['go']['app']['WailsApp']['GetOutboxJobs'](arg1);
 }
 
 export function GetSettings() {
@@ -56,6 +68,26 @@ export function ImportItemsDict() {
 
 export function OpenFileLocation(arg1) {
   return window['go']['app']['WailsApp']['OpenFileLocation'](arg1);
+}
+
+export function PollRepliesNow() {
+  return window['go']['app']['WailsApp']['PollRepliesNow']();
+}
+
+export function PollRepliesNowWithCount() {
+  return window['go']['app']['WailsApp']['PollRepliesNowWithCount']();
+}
+
+export function ProcessWatchFolderNow() {
+  return window['go']['app']['WailsApp']['ProcessWatchFolderNow']();
+}
+
+export function ResetSentRowsCounter() {
+  return window['go']['app']['WailsApp']['ResetSentRowsCounter']();
+}
+
+export function SaveAutomationSettings(arg1) {
+  return window['go']['app']['WailsApp']['SaveAutomationSettings'](arg1);
 }
 
 export function SaveCity(arg1) {
@@ -84,4 +116,8 @@ export function SelectRawReport() {
 
 export function SelectTemplate() {
   return window['go']['app']['WailsApp']['SelectTemplate']();
+}
+
+export function SendReportNow(arg1) {
+  return window['go']['app']['WailsApp']['SendReportNow'](arg1);
 }

@@ -238,7 +238,12 @@
   async function showUnresolvedModal(unresolved, backend) {
     var modal = document.getElementById("unresolvedModal");
     var listEl = document.getElementById("unresolvedList");
+    var retryStatus = document.getElementById("unresolvedRetryStatus");
     if (!modal || !listEl) return;
+    if (retryStatus) {
+      retryStatus.textContent = "";
+      retryStatus.className = "unresolved-retry-status";
+    }
     listEl.innerHTML = "";
     if (!unresolved || unresolved.length === 0) {
       var hint = document.createElement("p");
@@ -323,19 +328,33 @@
   });
 
   document.getElementById("btnUnresolvedRetry").addEventListener("click", async function () {
+    var statusEl = document.getElementById("unresolvedRetryStatus");
+    var setStatus = function (msg, isError) {
+      if (!statusEl) return;
+      statusEl.textContent = msg || "";
+      statusEl.className = "unresolved-retry-status" + (isError ? " error" : "");
+    };
     var backend = getBackend();
-    if (!backend || typeof backend.GenerateReport !== "function") return;
+    if (!backend || typeof backend.GenerateReport !== "function") {
+      var m0 = tr("unresolved_retry_noBackend");
+      setStatus(m0, true);
+      log(m0, "error");
+      return;
+    }
     var raw = (document.getElementById("rawPath") && document.getElementById("rawPath").value) ? document.getElementById("rawPath").value.trim() : "";
     var template = (document.getElementById("templatePath") && document.getElementById("templatePath").value) ? document.getElementById("templatePath").value.trim() : "";
     var output = (document.getElementById("outputDir") && document.getElementById("outputDir").value) ? document.getElementById("outputDir").value.trim() : "";
     if (!raw || !template || !output) {
+      setStatus(tr("unresolved_retry_fillPaths"), true);
       log(tr("msg_fillPathsShort"), "error");
       return;
     }
     var btn = document.getElementById("btnUnresolvedRetry");
     if (btn) btn.disabled = true;
+    setStatus(tr("unresolved_retry_generating"), false);
     try {
       var savedPath = await backend.GenerateReport(raw, template, output);
+      setStatus("", false);
       log(tr("msg_done") + ": " + savedPath, "success");
       setLastReportPath(savedPath);
       if (generateStatusEl) {
@@ -349,11 +368,12 @@
       if (modal) modal.style.display = "none";
     } catch (err) {
       var errMsg = err && err.message ? err.message : String(err);
+      setStatus(errMsg, true);
       log(errMsg, "error");
       if (errMsg.indexOf("unresolved_cities") !== -1 && typeof backend.GetLastUnresolvedCities === "function") {
         try {
           var unresolved = await backend.GetLastUnresolvedCities();
-          if (unresolved && unresolved.length > 0) showUnresolvedModal(unresolved, backend);
+          showUnresolvedModal(unresolved || [], backend);
         } catch (e) {}
       }
     } finally {
@@ -373,12 +393,35 @@
       const raw = (s && (s.inputFolder ?? s.InputFolder ?? ""));
       const out = (s && (s.outputFolder ?? s.OutputFolder ?? ""));
       const tpl = (s && (s.templatePath ?? s.TemplatePath ?? ""));
+      const smtpHost = (s && (s.smtpHost ?? s.SMTPHost ?? ""));
+      const smtpPort = (s && (s.smtpPort ?? s.SMTPPort ?? 587));
+      const smtpUser = (s && (s.smtpUser ?? s.SMTPUser ?? ""));
+      const smtpPassword = (s && (s.smtpPassword ?? s.SMTPPassword ?? ""));
+      const imapHost = (s && (s.imapHost ?? s.IMAPHost ?? ""));
+      const imapPort = (s && (s.imapPort ?? s.IMAPPort ?? 993));
+      const imapUser = (s && (s.imapUser ?? s.IMAPUser ?? ""));
+      const imapPassword = (s && (s.imapPassword ?? s.IMAPPassword ?? ""));
+      const autoSend = !!(s && (s.autoSend ?? s.AutoSend));
+      const watchEnabled = !!(s && (s.watchEnabled ?? s.WatchEnabled));
+      const watchFolder = (s && (s.watchFolder ?? s.WatchFolder ?? ""));
       if (raw || out || tpl) {
         rawPath.value = raw;
         outputDir.value = out;
         templatePath.value = tpl;
         log(tr("msg_savedPathsLoaded"), "success");
       }
+      var el;
+      el = document.getElementById("smtpHost"); if (el) el.value = smtpHost;
+      el = document.getElementById("smtpPort"); if (el) el.value = String(smtpPort || 587);
+      el = document.getElementById("smtpUser"); if (el) el.value = smtpUser;
+      el = document.getElementById("smtpPassword"); if (el) el.value = smtpPassword;
+      el = document.getElementById("imapHost"); if (el) el.value = imapHost;
+      el = document.getElementById("imapPort"); if (el) el.value = String(imapPort || 993);
+      el = document.getElementById("imapUser"); if (el) el.value = imapUser;
+      el = document.getElementById("imapPassword"); if (el) el.value = imapPassword;
+      el = document.getElementById("autoSendEnabled"); if (el) el.checked = autoSend;
+      el = document.getElementById("watchEnabled"); if (el) el.checked = watchEnabled;
+      el = document.getElementById("watchFolder"); if (el) el.value = watchFolder || raw || out;
     } catch (e) {}
   }
 
@@ -748,6 +791,233 @@
   }
   document.addEventListener("keydown", closeModalOnEscape);
 
+  var selectedJobId = 0;
+
+  async function refreshOutboxAndResults() {
+    const backend = getBackend();
+    if (!backend || typeof backend.GetOutboxJobs !== "function") return;
+    try {
+      var jobs = await backend.GetOutboxJobs(100);
+      var tbody = document.getElementById("outboxTbody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+      if (!jobs || !jobs.length) {
+        tbody.innerHTML = "<tr><td colspan=\"4\">-</td></tr>";
+      } else {
+        jobs.forEach(function (j) {
+          var id = j.id ?? j.ID ?? 0;
+          var report = j.reportPath ?? j.ReportPath ?? "";
+          var status = j.status ?? j.Status ?? "";
+          var err = j.error ?? j.Error ?? "";
+          var row = document.createElement("tr");
+          row.innerHTML = "<td>" + id + "</td><td>" + report + "</td><td>" + status + "</td><td>" + err + "</td>";
+          row.style.cursor = "pointer";
+          row.addEventListener("click", function () {
+            selectedJobId = id;
+            loadApprovalResults(id);
+          });
+          tbody.appendChild(row);
+        });
+      }
+      if (!selectedJobId && jobs && jobs.length) {
+        selectedJobId = jobs[0].id ?? jobs[0].ID ?? 0;
+      }
+      if (selectedJobId) await loadApprovalResults(selectedJobId);
+    } catch (e) {
+      log((e && e.message ? e.message : String(e)), "error");
+    }
+  }
+
+  async function loadApprovalResults(jobId) {
+    const backend = getBackend();
+    if (!backend || typeof backend.GetApprovalResults !== "function" || !jobId) return;
+    try {
+      var rows = await backend.GetApprovalResults(jobId);
+      var approved = document.getElementById("approvedTbody");
+      var rejected = document.getElementById("rejectedTbody");
+      if (!approved || !rejected) return;
+      approved.innerHTML = "";
+      rejected.innerHTML = "";
+      (rows || []).forEach(function (r) {
+        var status = (r.status ?? r.Status ?? "").toLowerCase();
+        var client = r.clientName ?? r.ClientName ?? "";
+        var hp = r.clientHP ?? r.ClientHP ?? "";
+        var inv = r.invoiceNum ?? r.InvoiceNum ?? "";
+        var appr = r.approvalNum ?? r.ApprovalNum ?? "";
+        var reason = r.rejectReason ?? r.RejectReason ?? "";
+        var row = document.createElement("tr");
+        if (status === "rejected") {
+          row.innerHTML = "<td>" + client + "</td><td>" + hp + "</td><td>" + inv + "</td><td>" + reason + "</td>";
+          rejected.appendChild(row);
+        } else {
+          row.innerHTML = "<td>" + client + "</td><td>" + hp + "</td><td>" + inv + "</td><td>" + appr + "</td>";
+          approved.appendChild(row);
+        }
+      });
+    } catch (e) {
+      log((e && e.message ? e.message : String(e)), "error");
+    }
+  }
+
+  var btnSaveAutomation = document.getElementById("btnSaveAutomation");
+  if (btnSaveAutomation) {
+    btnSaveAutomation.addEventListener("click", async function () {
+      const backend = getBackend();
+      if (!backend || typeof backend.SaveSettings !== "function") return;
+      try {
+        var raw = rawPath.value.trim();
+        var out = outputDir.value.trim();
+        var tpl = templatePath.value.trim();
+        await backend.SaveSettings(raw, out, tpl);
+        if (typeof backend.GetSettings === "function" && typeof backend.SaveAutomationSettings === "function") {
+          var s = await backend.GetSettings();
+          s.smtpHost = (document.getElementById("smtpHost").value || "").trim();
+          s.smtpPort = parseInt((document.getElementById("smtpPort").value || "587").trim(), 10) || 587;
+          s.smtpUser = (document.getElementById("smtpUser").value || "").trim();
+          s.smtpPassword = (document.getElementById("smtpPassword").value || "").trim();
+          s.imapHost = (document.getElementById("imapHost").value || "").trim();
+          s.imapPort = parseInt((document.getElementById("imapPort").value || "993").trim(), 10) || 993;
+          s.imapUser = (document.getElementById("imapUser").value || "").trim();
+          s.imapPassword = (document.getElementById("imapPassword").value || "").trim();
+          s.autoSend = !!(document.getElementById("autoSendEnabled").checked);
+          s.watchEnabled = !!(document.getElementById("watchEnabled").checked);
+          s.watchFolder = (document.getElementById("watchFolder").value || "").trim();
+          s.inputFolder = s.inputFolder ?? s.InputFolder ?? raw;
+          s.outputFolder = s.outputFolder ?? s.OutputFolder ?? out;
+          s.templatePath = s.templatePath ?? s.TemplatePath ?? tpl;
+          await backend.SaveAutomationSettings(s);
+        }
+        log(tr("automation_saved"), "success");
+      } catch (e) {
+        log((e && e.message ? e.message : String(e)), "error");
+      }
+    });
+  }
+
+  var btnWatchFolder = document.getElementById("btnWatchFolder");
+  if (btnWatchFolder) {
+    btnWatchFolder.addEventListener("click", async function () {
+      const backend = getBackend();
+      if (!backend || typeof backend.SelectOutputDir !== "function") return;
+      try {
+        var path = await backend.SelectOutputDir();
+        if (path) document.getElementById("watchFolder").value = path;
+      } catch (e) {}
+    });
+  }
+
+  var btnScanWatchNow = document.getElementById("btnScanWatchNow");
+  if (btnScanWatchNow) {
+    btnScanWatchNow.addEventListener("click", async function () {
+      const backend = getBackend();
+      if (!backend || typeof backend.ProcessWatchFolderNow !== "function") return;
+      try {
+        await backend.ProcessWatchFolderNow();
+        await refreshOutboxAndResults();
+      } catch (e) {
+        log((e && e.message ? e.message : String(e)), "error");
+      }
+    });
+  }
+
+  async function doResetSentRows() {
+    log("Сброс счетчика: запуск...", "success");
+    const backend = getBackend();
+    if (!backend || typeof backend.ResetSentRowsCounter !== "function") {
+      log("Сброс счетчика недоступен: метод backend не найден.", "error");
+      return;
+    }
+    try {
+      await backend.ResetSentRowsCounter();
+      log(tr("automation_resetSentRows") + ": OK", "success");
+    } catch (e) {
+      log((e && e.message ? e.message : String(e)), "error");
+    }
+  }
+
+  var btnResetSentRows = document.getElementById("btnResetSentRows");
+  if (btnResetSentRows) btnResetSentRows.addEventListener("click", doResetSentRows);
+  var btnQuickResetSentRows = document.getElementById("btnQuickResetSentRows");
+  if (btnQuickResetSentRows) btnQuickResetSentRows.addEventListener("click", doResetSentRows);
+
+  var btnRefreshOutbox = document.getElementById("btnRefreshOutbox");
+  if (btnRefreshOutbox) {
+    btnRefreshOutbox.addEventListener("click", refreshOutboxAndResults);
+  }
+
+  var btnPollRepliesNow = document.getElementById("btnPollRepliesNow");
+
+  async function doSendNow() {
+    log("Отправка: запуск...", "success");
+    const backend = getBackend();
+    if (!backend || typeof backend.SendReportNow !== "function") {
+      log("Отправка недоступна: метод backend не найден.", "error");
+      return;
+    }
+    try {
+      var jobs = await backend.GetOutboxJobs(100);
+      var selected = (jobs || []).find(function (j) { return (j.id ?? j.ID ?? 0) === selectedJobId; }) || (jobs && jobs.length ? jobs[0] : null);
+      var reportPath = selected ? (selected.reportPath ?? selected.ReportPath ?? "") : (lastSavedReportPath || "");
+      if (!reportPath) {
+        log("Нет отчёта для отправки (выберите строку outbox или сначала сгенерируйте отчёт).", "error");
+        return;
+      }
+      await backend.SendReportNow(reportPath);
+      log("Отправка выполнена: " + reportPath, "success");
+      await refreshOutboxAndResults();
+    } catch (e) {
+      log((e && e.message ? e.message : String(e)), "error");
+    }
+  }
+
+  var btnSendSelectedNow = document.getElementById("btnSendSelectedNow");
+  if (btnSendSelectedNow) btnSendSelectedNow.addEventListener("click", doSendNow);
+  var btnQuickSendNow = document.getElementById("btnQuickSendNow");
+  if (btnQuickSendNow) btnQuickSendNow.addEventListener("click", doSendNow);
+
+  var btnApplyReplyText = document.getElementById("btnApplyReplyText");
+  if (btnApplyReplyText) {
+    btnApplyReplyText.addEventListener("click", async function () {
+      const backend = getBackend();
+      if (!backend || typeof backend.ApplyReplyForJob !== "function" || !selectedJobId) return;
+      try {
+        var text = (document.getElementById("replyTextInput").value || "").trim();
+        await backend.ApplyReplyForJob(selectedJobId, text, "");
+        await refreshOutboxAndResults();
+      } catch (e) {
+        log((e && e.message ? e.message : String(e)), "error");
+      }
+    });
+  }
+
+  async function doPollReplies() {
+    log("Проверка ответов: запуск...", "success");
+    const backend = getBackend();
+    if (!backend) {
+      log("Проверка ответов недоступна: backend не найден.", "error");
+      return;
+    }
+    try {
+      var count = 0;
+      if (typeof backend.PollRepliesNowWithCount === "function") {
+        count = await backend.PollRepliesNowWithCount();
+      } else if (typeof backend.PollRepliesNow === "function") {
+        await backend.PollRepliesNow();
+      } else {
+        log("Проверка ответов недоступна: метод backend не найден.", "error");
+        return;
+      }
+      await refreshOutboxAndResults();
+      log("Проверка ответов завершена. Обработано: " + String(count || 0), "success");
+    } catch (e) {
+      log((e && e.message ? e.message : String(e)), "error");
+    }
+  }
+
+  var btnQuickPollReplies = document.getElementById("btnQuickPollReplies");
+  if (btnQuickPollReplies) btnQuickPollReplies.addEventListener("click", doPollReplies);
+  if (btnPollRepliesNow) btnPollRepliesNow.addEventListener("click", doPollReplies);
+
   window.onLangChange = function () {
     loadCitiesTable();
     loadDriversTable();
@@ -756,5 +1026,6 @@
 
   loadInitialSettings();
   loadCitiesTable();
+  refreshOutboxAndResults();
   log(tr("msg_ready"));
 })();

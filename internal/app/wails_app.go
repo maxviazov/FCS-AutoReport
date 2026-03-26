@@ -27,6 +27,8 @@ func NewWailsApp(svc *ReportService) *WailsApp {
 // Startup вызывается фреймворком Wails при запуске окна.
 func (a *WailsApp) Startup(ctx context.Context) {
 	a.ctx = ctx
+	_ = a.service.EnsureDailyReset()
+	a.service.StartBackground(ctx)
 	slog.Info("Wails UI запущен")
 }
 
@@ -56,6 +58,20 @@ func (a *WailsApp) SaveSettings(inputFolder, outputFolder, templatePath string) 
 	return nil
 }
 
+func (a *WailsApp) SaveAutomationSettings(s domain.Settings) error {
+	if s.SMTPPort <= 0 {
+		s.SMTPPort = 587
+	}
+	if s.IMAPPort <= 0 {
+		s.IMAPPort = 993
+	}
+	if err := a.service.DB().SaveSettings(&s); err != nil {
+		return fmt.Errorf("сохранение automation settings: %w", err)
+	}
+	a.service.Store().SetSettings(&s)
+	return nil
+}
+
 // GenerateReport вызывается из JavaScript: принимает пути к сырому файлу, шаблону и папке сохранения,
 // сохраняет их в настройки, выполняет агрегацию и экспорт. Возвращает путь к готовому отчёту или ошибку.
 func (a *WailsApp) GenerateReport(rawFilePath, templatePath, outputDir string) (string, error) {
@@ -67,16 +83,9 @@ func (a *WailsApp) GenerateReport(rawFilePath, templatePath, outputDir string) (
 		slog.Warn("не удалось сохранить пути", "err", err)
 	}
 
-	invoices, err := a.service.ProcessRawReport(rawFilePath)
+	savedPath, err := a.service.GenerateAndQueueFromRaw(rawFilePath, templatePath, outputDir)
 	if err != nil {
-		return "", fmt.Errorf("обработка отчёта: %w", err)
-	}
-	a.service.SetLastUnresolvedCities(invoices)
-
-	// Отчёт сохраняется всегда; строки без кода города — с пустыми полями города/водителя.
-	savedPath, err := ExportToExcel(invoices, templatePath, outputDir)
-	if err != nil {
-		return "", fmt.Errorf("сохранение отчёта: %w", err)
+		return "", err
 	}
 
 	return savedPath, nil
@@ -327,4 +336,39 @@ func (a *WailsApp) DeleteItem(itemCode string) error {
 		return fmt.Errorf("товар удалён, но кэш не обновлён: %w", err)
 	}
 	return nil
+}
+
+func (a *WailsApp) GetOutboxJobs(limit int) ([]domain.OutboxJob, error) {
+	return a.service.ListOutboxJobs(limit)
+}
+
+func (a *WailsApp) GetApprovalResults(jobID int) ([]domain.ApprovalResult, error) {
+	return a.service.ListApprovalResults(jobID)
+}
+
+func (a *WailsApp) SendReportNow(reportPath string) error {
+	slog.Info("SendReportNow вызван", "report", reportPath)
+	return a.service.SendQueuedReport(reportPath)
+}
+
+func (a *WailsApp) ApplyReplyForJob(jobID int, replyText, replyAttachmentPath string) error {
+	return a.service.ApplyReplyForJob(jobID, replyText, replyAttachmentPath)
+}
+
+func (a *WailsApp) ProcessWatchFolderNow() error {
+	return a.service.ProcessWatchFolderNow()
+}
+
+func (a *WailsApp) PollRepliesNow() error {
+	slog.Info("PollRepliesNow вызван")
+	return a.service.PollRepliesNow()
+}
+
+func (a *WailsApp) PollRepliesNowWithCount() (int, error) {
+	slog.Info("PollRepliesNowWithCount вызван")
+	return a.service.PollRepliesNowWithCount()
+}
+
+func (a *WailsApp) ResetSentRowsCounter() error {
+	return a.service.ResetSentRowsCounter()
 }
