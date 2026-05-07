@@ -137,6 +137,10 @@ type ClientXLSXExport struct {
 }
 
 const clientFileBaseMaxRunes = 48
+const (
+	readyExportsDirName  = "fish_reports_ready"
+	manualReviewDirName  = "fish_reports_manual_review"
+)
 
 // sanitizeClientFileBase убирает пробелы и небуквенно-цифровые символы (имя для имени файла).
 func sanitizeClientFileBase(name string) string {
@@ -239,7 +243,7 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		setCell(f, sheetName, 1, currentRow, SupplierName)
 		setCell(f, sheetName, 2, currentRow, 511777856)
 		setCell(f, sheetName, 3, currentRow, MoHNumber)
-		setCellFormula(f, sheetName, 4, currentRow, "TODAY()")
+		setReportDateCell(f, sheetName, 4, currentRow, inv.Date)
 		setCell(f, sheetName, driverCols.Vehicle, currentRow, inv.CarNumber)
 		setCell(f, sheetName, driverCols.DriverName, currentRow, inv.DriverName)
 		setCell(f, sheetName, driverCols.Phone, currentRow, inv.Phone)
@@ -282,7 +286,7 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		}
 
 		setCell(f, sheetName, 26, currentRow, roundWeight(inv.TotalBoxes))
-		setCellFormula(f, sheetName, 27, currentRow, fmt.Sprintf("W%d", currentRow))
+		setCell(f, sheetName, 27, currentRow, roundWeight(totalWeight))
 		setCell(f, sheetName, 28, currentRow, 1)
 
 		currentRow++
@@ -337,10 +341,10 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 	// 1) Приводим стили построчно по колонкам из строки 2 шаблона.
 	applyTemplateRow2Styles(exported, eSheet, 2, lastRow)
 
-	// 2) Обязательные формулы по требованиям.
+	// 2) Обязательные формулы/типы по требованиям.
 	for row := 2; row <= lastRow; row++ {
-		setCellFormula(exported, eSheet, 4, row, "TODAY()")
-		setCellFormula(exported, eSheet, 27, row, fmt.Sprintf("W%d", row))
+		normalizeDateCell(exported, eSheet, 4, row)
+		setCell(exported, eSheet, 27, row, roundWeight(calcWeightsSumForRow(exported, eSheet, row)))
 	}
 
 	// 3) Повторная очистка названия клиента (защита от спецсимволов).
@@ -360,11 +364,11 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 	return false, ""
 }
 
-func writeManualReviewReport(runDir string, reviewPaths []string) {
+func writeManualReviewReport(manualDir string, reviewPaths []string) {
 	if len(reviewPaths) == 0 {
 		return
 	}
-	reportPath := filepath.Join(runDir, "manual_review_required.txt")
+	reportPath := filepath.Join(manualDir, "manual_review_required.txt")
 	var b strings.Builder
 	b.WriteString("Эти файлы не удалось автоматически привести к требованиям и требуют ручной доработки:\n")
 	for _, p := range reviewPaths {
@@ -379,11 +383,10 @@ func writeManualReviewReport(runDir string, reviewPaths []string) {
 	slog.Warn("Создан отчёт по файлам для ручной доработки", "path", reportPath, "count", len(reviewPaths))
 }
 
-func moveToManualReviewDir(runDir, filePath string) string {
+func moveToManualReviewDir(manualDir, filePath string) string {
 	if strings.TrimSpace(filePath) == "" {
 		return filePath
 	}
-	manualDir := filepath.Join(runDir, "manual_review")
 	if err := os.MkdirAll(manualDir, 0o755); err != nil {
 		slog.Warn("Не удалось создать папку manual_review", "dir", manualDir, "err", err)
 		return filePath
@@ -396,17 +399,25 @@ func moveToManualReviewDir(runDir, filePath string) string {
 	return dst
 }
 
+func resetManagedDir(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
 // ExportPerClientToRunFolder создаёт подпапку fish_reports_ГГГГ-ММ-ДД_ЧЧ-ММ-СС в parentOutDir
 // и по одному xlsx на клиента (группировка по ח"פ). Имя файла — короткое имя + _חפ.xlsx.
 func ExportPerClientToRunFolder(parentOutDir, templatePath string, invoices []*domain.AggregatedInvoice) (runDir string, exports []ClientXLSXExport, manualReview []string, err error) {
 	if len(invoices) == 0 {
 		return "", nil, nil, fmt.Errorf("нет накладных для экспорта")
 	}
-	stamp := time.Now().Format("2006-01-02_15-04-05")
-	runDir = filepath.Join(parentOutDir, "fish_reports_"+stamp)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
+	runDir = filepath.Join(parentOutDir, readyExportsDirName)
+	manualDir := filepath.Join(parentOutDir, manualReviewDirName)
+	if err := resetManagedDir(runDir); err != nil {
 		return "", nil, nil, fmt.Errorf("создание папки отчёта: %w", err)
 	}
+	_ = os.RemoveAll(manualDir)
 
 	byHP := make(map[string][]*domain.AggregatedInvoice)
 	order := make([]string, 0)
@@ -434,14 +445,14 @@ func ExportPerClientToRunFolder(parentOutDir, templatePath string, invoices []*d
 			continue
 		}
 		if needsManual, reason := postExportValidateAndRepair(path, templatePath); needsManual {
-			manualPath := moveToManualReviewDir(runDir, path)
+			manualPath := moveToManualReviewDir(manualDir, path)
 			slog.Warn("Авто-доработка невозможна, требуется ручная проверка файла", "path", manualPath, "reason", reason)
 			manualReview = append(manualReview, manualPath)
 			continue
 		}
 		exports = append(exports, ClientXLSXExport{Path: path, Invoices: group})
 	}
-	writeManualReviewReport(runDir, manualReview)
+	writeManualReviewReport(manualDir, manualReview)
 
 	slog.Info("Пакет отчётов по клиентам сохранён", "run_dir", runDir, "files", len(exports), "manual_review_count", len(manualReview))
 	return runDir, exports, manualReview, nil
@@ -584,6 +595,78 @@ func setCellFormula(f *excelize.File, sheet string, col, row int, formula string
 	if err := f.SetCellFormula(sheet, cellName, formula); err != nil {
 		slog.Error("Запись формулы", "cell", cellName, "formula", formula, "err", err)
 	}
+}
+
+func setReportDateCell(f *excelize.File, sheet string, col, row int, raw string) {
+	cellName, err := excelize.CoordinatesToCellName(col, row)
+	if err != nil {
+		slog.Error("Координаты ячейки даты", "col", col, "row", row, "err", err)
+		return
+	}
+	if dt, ok := parseReportDate(raw); ok {
+		if err := f.SetCellValue(sheet, cellName, dt); err != nil {
+			slog.Warn("Не удалось записать дату как date, используем исходную строку", "cell", cellName, "err", err)
+			_ = f.SetCellValue(sheet, cellName, strings.TrimSpace(raw))
+		}
+		return
+	}
+	_ = f.SetCellValue(sheet, cellName, strings.TrimSpace(raw))
+}
+
+func parseReportDate(raw string) (time.Time, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		"02.01.2006",
+		"2.1.2006",
+		"2006-01-02",
+		"02/01/2006",
+		"2/1/2006",
+	}
+	for _, layout := range layouts {
+		if dt, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return dt, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func normalizeDateCell(f *excelize.File, sheet string, col, row int) {
+	cellName, err := excelize.CoordinatesToCellName(col, row)
+	if err != nil {
+		return
+	}
+	v, err := f.GetCellValue(sheet, cellName)
+	if err != nil {
+		return
+	}
+	if dt, ok := parseReportDate(v); ok {
+		_ = f.SetCellValue(sheet, cellName, dt)
+	}
+}
+
+func calcWeightsSumForRow(f *excelize.File, sheet string, row int) float64 {
+	var sum float64
+	for col := 15; col <= 25; col++ {
+		cellName, err := excelize.CoordinatesToCellName(col, row)
+		if err != nil {
+			continue
+		}
+		v, err := f.GetCellValue(sheet, cellName)
+		if err != nil {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			sum += n
+		}
+	}
+	return sum
 }
 
 // applyTemplateRow2Styles копирует стиль из строки 2 шаблона на все строки данных по колонкам.
