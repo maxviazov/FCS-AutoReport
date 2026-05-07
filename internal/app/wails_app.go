@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"fcs-autoreport/internal/domain"
 
@@ -72,8 +74,22 @@ func (a *WailsApp) SaveAutomationSettings(s domain.Settings) error {
 	return nil
 }
 
+// SaveExportPerClient сохраняет режим экспорта (отдельные файлы по клиентам или один общий).
+func (a *WailsApp) SaveExportPerClient(exportPerClient bool) error {
+	s, err := a.service.DB().GetSettings()
+	if err != nil {
+		return fmt.Errorf("настройки: %w", err)
+	}
+	s.ExportPerClient = exportPerClient
+	if err := a.service.DB().SaveSettings(s); err != nil {
+		return fmt.Errorf("сохранение режима экспорта: %w", err)
+	}
+	a.service.Store().SetSettings(s)
+	return nil
+}
+
 // GenerateReport вызывается из JavaScript: принимает пути к сырому файлу, шаблону и папке сохранения,
-// сохраняет их в настройки, выполняет агрегацию и экспорт. Возвращает путь к готовому отчёту или ошибку.
+// сохраняет их в настройки, выполняет агрегацию и экспорт. Возвращает путь к папке fish_reports_* или к одному FCS_Report_*.xlsx.
 func (a *WailsApp) GenerateReport(rawFilePath, templatePath, outputDir string) (string, error) {
 	slog.Info("GenerateReport из UI", "raw", rawFilePath)
 	if rawFilePath == "" || templatePath == "" || outputDir == "" {
@@ -87,8 +103,25 @@ func (a *WailsApp) GenerateReport(rawFilePath, templatePath, outputDir string) (
 	if err != nil {
 		return "", err
 	}
+	manual := a.service.GetLastManualReviewFiles()
+	if len(manual) > 0 {
+		msg := "Часть файлов требует ручной правки и сохранена отдельно в папке manual_review.\n\n"
+		msg += "Эти файлы не учтены в счётчике обработанных и не отправлены.\n"
+		if len(manual) <= 8 {
+			msg += "\n" + strings.Join(manual, "\n")
+		}
+		_, _ = runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.WarningDialog,
+			Title:   "Требуется ручная доработка",
+			Message: msg,
+		})
+	}
 
 	return savedPath, nil
+}
+
+func (a *WailsApp) GetLastManualReviewFiles() ([]string, error) {
+	return a.service.GetLastManualReviewFiles(), nil
 }
 
 // OpenFileLocation открывает в проводнике папку, в которой лежит файл отчёта.
@@ -101,13 +134,19 @@ func (a *WailsApp) OpenFileLocation(filePath string) error {
 	if err != nil {
 		return fmt.Errorf("получение абсолютного пути: %w", err)
 	}
-	dir := filepath.Dir(abs)
-	// Windows: explorer "C:\path\to\folder" — открывает именно эту папку
-	cmd := exec.Command("explorer", dir)
+	info, err := os.Stat(abs)
+	if err != nil {
+		return fmt.Errorf("проверка пути: %w", err)
+	}
+	openTarget := abs
+	if !info.IsDir() {
+		openTarget = filepath.Dir(abs)
+	}
+	cmd := exec.Command("explorer", openTarget)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("запуск проводника: %w", err)
 	}
-	slog.Info("Открыта папка отчёта", "dir", dir)
+	slog.Info("Открыта папка отчёта", "dir", openTarget)
 	return nil
 }
 

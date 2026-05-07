@@ -36,6 +36,7 @@ type ReportService struct {
 	store          *store.Store
 	mu             sync.Mutex
 	lastUnresolved []string // уникальные названия городов/адреса, не распознанные при последней агрегации
+	lastManualReview []string
 	bgCancel       context.CancelFunc
 	lastResetDate  string
 }
@@ -71,6 +72,10 @@ func (s *ReportService) LoadDictionariesToMemory() error {
 	items, err := s.db.ListItems()
 	if err != nil {
 		return fmt.Errorf("загрузка товаров: %w", err)
+	}
+
+	if err := dict.MergeBuiltinCityAliases(s.db); err != nil {
+		slog.Warn("Встроенные алиасы городов", "err", err)
 	}
 
 	cities, err := s.db.ListCities()
@@ -181,6 +186,29 @@ func (s *ReportService) GetLastUnresolvedCities() []string {
 	return out
 }
 
+func (s *ReportService) SetLastManualReviewFiles(paths []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(paths) == 0 {
+		s.lastManualReview = nil
+		return
+	}
+	out := make([]string, len(paths))
+	copy(out, paths)
+	s.lastManualReview = out
+}
+
+func (s *ReportService) GetLastManualReviewFiles() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.lastManualReview) == 0 {
+		return nil
+	}
+	out := make([]string, len(s.lastManualReview))
+	copy(out, s.lastManualReview)
+	return out
+}
+
 func DedupKey(invoiceNum, clientName string) string {
 	return domain.NormalizeText(invoiceNum) + "|" + domain.NormalizeText(clientName)
 }
@@ -288,6 +316,46 @@ func (s *ReportService) GenerateAndQueueFromRaw(rawFilePath, templatePath, outpu
 	if len(filtered) == 0 {
 		return "", fmt.Errorf("на сегодня нет новых строк для отправки")
 	}
+
+	exportPerClient := true
+	if st, err := s.db.GetSettings(); err == nil && st != nil {
+		exportPerClient = st.ExportPerClient
+	}
+
+	if exportPerClient {
+		runDir, exports, manualReview, err := ExportPerClientToRunFolder(outputDir, templatePath, filtered)
+		if err != nil {
+			return "", err
+		}
+		s.SetLastManualReviewFiles(manualReview)
+		manualSet := make(map[string]bool, len(manualReview))
+		for _, p := range manualReview {
+			manualSet[p] = true
+		}
+		for _, ex := range exports {
+			if manualSet[ex.Path] {
+				slog.Warn("Файл исключён из отправки до ручной доработки", "report", ex.Path)
+				continue
+			}
+			if err := s.MarkInvoicesSent(ex.Invoices, ex.Path); err != nil {
+				slog.Warn("mark sent failed", "err", err)
+			}
+			if _, err := s.QueueReportForAutoSend(ex.Path); err != nil {
+				slog.Warn("queue failed", "err", err)
+			}
+		}
+		settings, _ := s.db.GetSettings()
+		if settings != nil && settings.AutoSend {
+			for _, ex := range exports {
+				if err := s.SendQueuedReport(ex.Path); err != nil {
+					slog.Warn("auto send failed", "report", ex.Path, "err", err)
+				}
+			}
+		}
+		return runDir, nil
+	}
+	s.SetLastManualReviewFiles(nil)
+
 	savedPath, err := ExportToExcel(filtered, templatePath, outputDir)
 	if err != nil {
 		return "", err
@@ -528,6 +596,10 @@ func (s *ReportService) processWatchFolderOnce() error {
 		}
 		if _, err := s.GenerateAndQueueFromRaw(full, settings.TemplatePath, settings.OutputFolder); err != nil {
 			slog.Warn("watcher raw processing failed", "file", full, "err", err)
+			continue
+		}
+		if len(s.GetLastManualReviewFiles()) > 0 {
+			slog.Warn("watcher: сырой файл требует ручной доработки экспортов, в processed не отмечаем", "file", full)
 			continue
 		}
 		_ = s.db.MarkFileProcessed(full, "raw", "processed")
