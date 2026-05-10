@@ -39,3 +39,13 @@ func NormalizeText(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// NormalizeCityLookupKey приводит фрагмент адреса к виду, совпадающему со справочником МОЗ:
+// в сырых файлах город часто пишут с дефисом или maqaf между словами (מגדל-העמק), в справочнике — с пробелом (מגדל העמק).
+func NormalizeCityLookupKey(s string) string {
+	s = strings.ReplaceAll(s, "\u05be", " ") // maqaf
+	s = strings.ReplaceAll(s, "-", " ")
+	s = strings.ReplaceAll(s, "–", " ") // en dash
+	s = strings.ReplaceAll(s, "—", " ") // em dash
+	return NormalizeText(s)
+}

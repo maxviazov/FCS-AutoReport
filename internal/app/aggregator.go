@@ -124,7 +124,12 @@ findHeader:
 		if clientNameCol >= 0 {
 			clientNameRaw = domain.NormalizeText(getCol(clientNameCol))
 		}
-		rawAddress := domain.NormalizeText(getCol(12))
+		var rawAddress string
+		if addressCol >= 0 {
+			rawAddress = domain.NormalizeText(getCol(addressCol))
+		} else {
+			rawAddress = domain.NormalizeText(getCol(12))
+		}
 		itemCode := domain.NormalizeText(getCol(15))
 		boxesStr := getCol(boxesCol)
 		weightStr := getCol(weightCol)
@@ -181,8 +186,17 @@ findHeader:
 						inv.CityCode = code
 					}
 				}
+			}
+			// Город часто указан только в названии клиента (שם לועזי), а כתובת пустая — напр. "רוסמן - מגדל העמק ביג".
+			if inv.CityCode == "" && clientNameRaw != "" {
+				lookup := domain.NormalizeCityLookupKey(clientNameRaw)
+				if code, _ := s.store.ResolveCityCode(lookup); code != "" {
+					inv.CityCode = code
+				}
 				if inv.CityCode == "" {
-					inv.Errors = append(inv.Errors, fmt.Sprintf("Город не найден: %s (Адрес: %s)", cityStr, rawAddress))
+					if code, _ := s.store.ResolveCityCodeBySubstring(lookup); code != "" {
+						inv.CityCode = code
+					}
 				}
 			}
 			if inv.CityCode == "" && hp != "" {
@@ -191,6 +205,9 @@ findHeader:
 				}
 			}
 			if inv.CityCode == "" {
+				if cityStr != "" {
+					inv.Errors = append(inv.Errors, fmt.Sprintf("Город не найден: %s (Адрес: %s)", cityStr, rawAddress))
+				}
 				inv.Errors = append(inv.Errors, "Нет кода города: укажите адрес с городом или добавьте клиента с кодом города в справочник")
 			}
 

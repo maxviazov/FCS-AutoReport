@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 
 	"fcs-autoreport/internal/db"
+	"fcs-autoreport/internal/dict"
 	"fcs-autoreport/internal/store"
 )
 
@@ -14,9 +16,8 @@ func Bootstrap(dataDir string) (*db.DB, *store.Store, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("init db: %w", err)
 	}
-	if err := database.EnsureTelAvivAlias(); err != nil {
-		// не прерываем старт при ошибке добавления алиаса
-		_ = err
+	if err := dict.MergeBuiltinCityAliases(database); err != nil {
+		slog.Warn("Встроенные алиасы городов при старте", "err", err)
 	}
 
 	s := store.New()

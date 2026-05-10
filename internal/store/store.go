@@ -286,6 +286,15 @@ func (s *Store) ResolveCityCode(rawCity string) (code string, err error) {
 	if c, ok := s.CitiesByAlias[key]; ok {
 		return c.Code, nil
 	}
+	keyAlt := domain.NormalizeCityLookupKey(rawCity)
+	if keyAlt != "" && keyAlt != key {
+		if c, ok := s.Cities[keyAlt]; ok {
+			return c.Code, nil
+		}
+		if c, ok := s.CitiesByAlias[keyAlt]; ok {
+			return c.Code, nil
+		}
+	}
 	return "", fmt.Errorf("не найден город %q: добавьте его в справочник или укажите как алиас", rawCity)
 }
 
@@ -295,7 +304,7 @@ func (s *Store) ResolveCityCode(rawCity string) (code string, err error) {
 func (s *Store) ResolveCityCodeBySubstring(rawCity string) (code string, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	key := domain.NormalizeText(rawCity)
+	key := domain.NormalizeCityLookupKey(rawCity)
 	if key == "" {
 		return "", fmt.Errorf("пустое значение города")
 	}

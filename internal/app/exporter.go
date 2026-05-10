@@ -259,7 +259,7 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		setCell(f, sheetName, clientCol, currentRow, cleanClientName)
 		setCell(f, sheetName, 9, currentRow, "קמעונאי")
 		setCell(f, sheetName, 10, currentRow, inv.CityCode)
-		setCell(f, sheetName, 11, currentRow, mohAddressCell(inv.Address))
+		setCell(f, sheetName, 11, currentRow, mohAddressCellWithFallback(inv.Address, inv.ClientName))
 		setCell(f, sheetName, 13, currentRow, 0)
 		setCell(f, sheetName, 14, currentRow, numericOrString(inv.InvoiceNum))
 
@@ -548,6 +548,26 @@ func mohAddressCell(addr string) string {
 		return addr
 	}
 	return streetFromAddress(addr)
+}
+
+// mohAddressCellWithFallback — при пустом כתובת в SAP подставляет точку из названия клиента
+// (часть после « - »), напр. «רוסמן - מגדל העמק ביג» → «מגדל העמק ביג». Иначе ветслужба отклоняет «נקודות שיווק».
+func mohAddressCellWithFallback(addr, clientName string) string {
+	cell := mohAddressCell(addr)
+	if cell != "" {
+		return cell
+	}
+	clientName = domain.NormalizeText(clientName)
+	if clientName == "" {
+		return ""
+	}
+	if _, after, ok := strings.Cut(clientName, " - "); ok {
+		after = strings.TrimSpace(after)
+		if after != "" {
+			return after
+		}
+	}
+	return clientName
 }
 
 // applyDataFormatting задаёт числовой формат для колонок с числами (с теми же бордюрами и выравниванием, чтобы не затереть стиль).
