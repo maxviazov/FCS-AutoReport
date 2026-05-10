@@ -1,0 +1,6 @@
+{
+  // gopls < v0.21 не знает значение "Prompt" для vulncheck — расширение Go всё равно шлёт его по умолчанию.
+  // "Imports" поддерживается всеми версиями и убирает ошибку Invalid settings: vulncheck ... Prompt
+  // После обновления gopls до v0.21+ можно вернуть "Prompt" или удалить эту строку.
+  "go.diagnostic.vulncheck": "Imports"
+}
