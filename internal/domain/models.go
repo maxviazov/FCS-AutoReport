@@ -30,6 +30,8 @@ type Settings struct {
 	AutoSend     bool   `json:"autoSend"`
 	WatchEnabled bool   `json:"watchEnabled"`
 	WatchFolder  string `json:"watchFolder"`
+	// ExportPerClient: true — папка fish_reports_* и отдельный xlsx на каждого клиента; false — один FCS_Report_*.xlsx.
+	ExportPerClient bool `json:"exportPerClient"`
 }
 
 // Client описывает клиента для подстановки кода города

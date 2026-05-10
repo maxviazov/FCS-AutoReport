@@ -40,6 +40,13 @@
     return null;
   }
 
+  async function syncExportPerClientToBackend() {
+    var backend = getBackend();
+    var el = document.getElementById("exportPerClientMode");
+    if (!backend || !el || typeof backend.SaveExportPerClient !== "function") return;
+    await backend.SaveExportPerClient(!!el.checked);
+  }
+
   document.querySelectorAll(".lang-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var lang = btn.getAttribute("data-lang");
@@ -97,6 +104,13 @@
       log((e && e.message ? e.message : String(e)), "error");
     }
   });
+
+  var exportPerClientEl = document.getElementById("exportPerClientMode");
+  if (exportPerClientEl) {
+    exportPerClientEl.addEventListener("change", function () {
+      syncExportPerClientToBackend().catch(function () {});
+    });
+  }
 
   document.getElementById("btnImportCities").addEventListener("click", async function () {
     const backend = getBackend();
@@ -183,6 +197,7 @@
     }
     log(tr("msg_generating"));
     try {
+      await syncExportPerClientToBackend();
       const savedPath = await backend.GenerateReport(raw, template, output);
       log(tr("msg_done") + ": " + savedPath, "success");
       log(tr("msg_savedPaths"));
@@ -353,6 +368,7 @@
     if (btn) btn.disabled = true;
     setStatus(tr("unresolved_retry_generating"), false);
     try {
+      await syncExportPerClientToBackend();
       var savedPath = await backend.GenerateReport(raw, template, output);
       setStatus("", false);
       log(tr("msg_done") + ": " + savedPath, "success");
@@ -422,6 +438,9 @@
       el = document.getElementById("autoSendEnabled"); if (el) el.checked = autoSend;
       el = document.getElementById("watchEnabled"); if (el) el.checked = watchEnabled;
       el = document.getElementById("watchFolder"); if (el) el.value = watchFolder || raw || out;
+      var exportPerClient = true;
+      if (s && (s.exportPerClient === false || s.ExportPerClient === false)) exportPerClient = false;
+      el = document.getElementById("exportPerClientMode"); if (el) el.checked = exportPerClient;
     } catch (e) {}
   }
 
@@ -882,6 +901,8 @@
           s.autoSend = !!(document.getElementById("autoSendEnabled").checked);
           s.watchEnabled = !!(document.getElementById("watchEnabled").checked);
           s.watchFolder = (document.getElementById("watchFolder").value || "").trim();
+          var expEl = document.getElementById("exportPerClientMode");
+          s.exportPerClient = expEl ? !!expEl.checked : true;
           s.inputFolder = s.inputFolder ?? s.InputFolder ?? raw;
           s.outputFolder = s.outputFolder ?? s.OutputFolder ?? out;
           s.templatePath = s.templatePath ?? s.TemplatePath ?? tpl;

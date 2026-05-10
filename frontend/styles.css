@@ -178,6 +178,16 @@ header h1 {
   margin-bottom: 0.85rem;
 }
 
+.field.field-checkbox {
+  align-items: flex-start;
+}
+
+.field.field-checkbox label {
+  flex: 1;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
 .field label {
   flex: 0 0 140px;
   font-size: 0.92rem;

@@ -80,48 +80,8 @@ func (db *DB) migrate() error {
 	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN auto_send INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN watch_folder TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.conn.Exec(`ALTER TABLE settings ADD COLUMN export_per_client INTEGER NOT NULL DEFAULT 1`)
 	return nil
-}
-
-// EnsureTelAvivAlias добавляет алиас "תל אביב" к городу "תל אביב יפו" (если запись есть — дополняет алиасы; если нет — создаёт город).
-func (db *DB) EnsureTelAvivAlias() error {
-	const cityName = "תל אביב יפו"
-	const alias = "תל אביב"
-	const defaultCode = "N126"
-
-	city, err := db.GetCityByName(cityName)
-	if err != nil {
-		return err
-	}
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if city != nil {
-		hasAlias := false
-		for _, a := range city.Aliases {
-			if strings.TrimSpace(a) == alias {
-				hasAlias = true
-				break
-			}
-		}
-		if hasAlias {
-			return nil
-		}
-		city.Aliases = append(city.Aliases, alias)
-		aliasesJSON := "[]"
-		if len(city.Aliases) > 0 {
-			b, _ := json.Marshal(city.Aliases)
-			aliasesJSON = string(b)
-		}
-		_, err = db.conn.Exec(`UPDATE cities SET aliases = ? WHERE id = ?`, aliasesJSON, city.ID)
-		return err
-	}
-	// Города нет — создаём с алиасом
-	aliasesJSONBytes, _ := json.Marshal([]string{alias})
-	_, err = db.conn.Exec(
-		`INSERT OR IGNORE INTO cities (name, code, aliases) VALUES (?, ?, ?)`,
-		cityName, defaultCode, string(aliasesJSONBytes),
-	)
-	return err
 }
 
 func splitSQL(s string) []string {
@@ -153,22 +113,24 @@ func (db *DB) GetSettings() (*domain.Settings, error) {
 	var s domain.Settings
 	var autoSend int
 	var watchEnabled int
+	var exportPerClient int
 	err := db.conn.QueryRow(
-		`SELECT raw_reports_path, output_path, template_path, smtp_host, smtp_port, smtp_user, smtp_password, imap_host, imap_port, imap_user, imap_password, auto_send, watch_enabled, watch_folder FROM settings WHERE id = 1`,
+		`SELECT raw_reports_path, output_path, template_path, smtp_host, smtp_port, smtp_user, smtp_password, imap_host, imap_port, imap_user, imap_password, auto_send, watch_enabled, watch_folder, export_per_client FROM settings WHERE id = 1`,
 	).Scan(
 		&s.InputFolder, &s.OutputFolder, &s.TemplatePath,
 		&s.SMTPHost, &s.SMTPPort, &s.SMTPUser, &s.SMTPPassword,
 		&s.IMAPHost, &s.IMAPPort, &s.IMAPUser, &s.IMAPPassword,
-		&autoSend, &watchEnabled, &s.WatchFolder,
+		&autoSend, &watchEnabled, &s.WatchFolder, &exportPerClient,
 	)
 	if err == sql.ErrNoRows {
-		return &domain.Settings{}, nil
+		return &domain.Settings{ExportPerClient: true}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
 	}
 	s.AutoSend = autoSend == 1
 	s.WatchEnabled = watchEnabled == 1
+	s.ExportPerClient = exportPerClient == 1
 	return &s, nil
 }
 
@@ -177,11 +139,12 @@ func (db *DB) SaveSettings(s *domain.Settings) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	_, err := db.conn.Exec(
-		`UPDATE settings SET raw_reports_path = ?, output_path = ?, template_path = ?, smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_password = ?, imap_host = ?, imap_port = ?, imap_user = ?, imap_password = ?, auto_send = ?, watch_enabled = ?, watch_folder = ? WHERE id = 1`,
+		`UPDATE settings SET raw_reports_path = ?, output_path = ?, template_path = ?, smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_password = ?, imap_host = ?, imap_port = ?, imap_user = ?, imap_password = ?, auto_send = ?, watch_enabled = ?, watch_folder = ?, export_per_client = ? WHERE id = 1`,
 		s.InputFolder, s.OutputFolder, s.TemplatePath,
 		s.SMTPHost, s.SMTPPort, s.SMTPUser, s.SMTPPassword,
 		s.IMAPHost, s.IMAPPort, s.IMAPUser, s.IMAPPassword,
 		boolToInt(s.AutoSend), boolToInt(s.WatchEnabled), s.WatchFolder,
+		boolToInt(s.ExportPerClient),
 	)
 	return err
 }

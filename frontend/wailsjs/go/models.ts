@@ -115,6 +115,7 @@ export namespace domain {
 	    autoSend: boolean;
 	    watchEnabled: boolean;
 	    watchFolder: string;
+	    exportPerClient: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -136,6 +137,7 @@ export namespace domain {
 	        this.autoSend = source["autoSend"];
 	        this.watchEnabled = source["watchEnabled"];
 	        this.watchFolder = source["watchFolder"];
+	        this.exportPerClient = source["exportPerClient"];
 	    }
 	}
 

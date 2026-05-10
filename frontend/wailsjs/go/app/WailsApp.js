@@ -98,6 +98,10 @@ export function SaveDriver(arg1) {
   return window['go']['app']['WailsApp']['SaveDriver'](arg1);
 }
 
+export function SaveExportPerClient(arg1) {
+  return window['go']['app']['WailsApp']['SaveExportPerClient'](arg1);
+}
+
 export function SaveItem(arg1) {
   return window['go']['app']['WailsApp']['SaveItem'](arg1);
 }

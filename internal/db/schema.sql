@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS settings (
     imap_password TEXT NOT NULL DEFAULT '',
     auto_send INTEGER NOT NULL DEFAULT 0,
     watch_enabled INTEGER NOT NULL DEFAULT 0,
-    watch_folder TEXT NOT NULL DEFAULT ''
+    watch_folder TEXT NOT NULL DEFAULT '',
+    export_per_client INTEGER NOT NULL DEFAULT 1
 );
 
 -- Ограничение: только одна строка в settings

@@ -50,6 +50,8 @@ export function SaveCity(arg1:domain.City):Promise<void>;
 
 export function SaveDriver(arg1:domain.Driver):Promise<void>;
 
+export function SaveExportPerClient(arg1:boolean):Promise<void>;
+
 export function SaveItem(arg1:domain.Item):Promise<void>;
 
 export function SaveSettings(arg1:string,arg2:string,arg3:string):Promise<void>;
