@@ -49,7 +49,9 @@ func (s *ReportService) ProcessRawReport(rawFilePath string) ([]*domain.Aggregat
 	// Колонки: "שם לועזי" до "כתובת" — клиент, после "קוד פריט" — товар. Берём только до "כתובת".
 	clientNameCol := -1
 	addressCol := -1
+	rawCityNameCol := -1 // явное название города в сыром отчёте (עיר / שם עיר / ישוב)
 	itemCodeCol := -1
+	districtCol := -1
 	weightCol := 25   // סה"כ משקל или משקל
 	boxesCol := 23
 	var headerRow int
@@ -70,8 +72,21 @@ findHeader:
 			if n == "כתובת" {
 				addressCol = j
 			}
+			if n == "מחוז" || (strings.Contains(n, "מחוז") && !strings.Contains(n, "קוד")) {
+				districtCol = j
+			}
 			if itemCodeCol < 0 && (n == "קוד פריט" || (strings.Contains(n, "קוד") && strings.Contains(n, "פריט"))) {
 				itemCodeCol = j
+			}
+			if rawCityNameCol < 0 {
+				switch n {
+				case "עיר", "שם עיר", "שם העיר", "ישוב":
+					rawCityNameCol = j
+				default:
+					if strings.Contains(n, "עיר") && !strings.Contains(n, "קוד") {
+						rawCityNameCol = j
+					}
+				}
 			}
 			if strings.Contains(n, "משקל") {
 				weightCol = j
@@ -96,7 +111,7 @@ findHeader:
 				clientNameCol = 11
 			}
 		}
-		slog.Info("Сырой отчёт: колонка имени клиента", "header_row", headerRow, "clientNameCol", clientNameCol, "addressCol", addressCol, "itemCodeCol", itemCodeCol)
+		slog.Info("Сырой отчёт: колонка имени клиента", "header_row", headerRow, "clientNameCol", clientNameCol, "rawCityNameCol", rawCityNameCol, "addressCol", addressCol, "districtCol", districtCol, "itemCodeCol", itemCodeCol)
 	}
 
 	invoiceMap := make(map[string]*domain.AggregatedInvoice)
@@ -130,6 +145,14 @@ findHeader:
 		} else {
 			rawAddress = domain.NormalizeText(getCol(12))
 		}
+		var districtRaw string
+		if districtCol >= 0 {
+			districtRaw = getCol(districtCol)
+		}
+		rawCityNameCell := ""
+		if rawCityNameCol >= 0 {
+			rawCityNameCell = domain.NormalizeText(getCol(rawCityNameCol))
+		}
 		itemCode := domain.NormalizeText(getCol(15))
 		boxesStr := getCol(boxesCol)
 		weightStr := getCol(weightCol)
@@ -149,8 +172,14 @@ findHeader:
 			weightKg = rawWeight
 		}
 		weightKg = math.Round(weightKg*1000) / 1000
+		if weightKg < 0 {
+			continue
+		}
 
 		boxes := parseFloat(boxesStr)
+		if boxes < 0 {
+			boxes = 0
+		}
 
 		inv, exists := invoiceMap[invoiceNum]
 		if !exists {
@@ -169,46 +198,159 @@ findHeader:
 				Errors:     nil,
 			}
 
-			// Код города: часть до запятой → точное совпадение; снятие префикса; поиск по подстроке; затем клиент по HP
+			// Код города: часть до запятой → точное совпадение; снятие префикса; поиск по подстроке; затем клиент по HP.
+			// Берём только коды вида «лат. буква + 2–4 цифры» (в т.ч. N61, N610 из реестра МОЗ).
+			trySetCityCode := func(code string) {
+				if inv.CityCode != "" {
+					return
+				}
+				c := domain.CanonicalMoHCityCode(code)
+				if c == "" {
+					return
+				}
+				if domain.IsMoHCityCodeFormat(c) {
+					if c == "N61" && !domain.AllowMoHN61CityCode(rawAddress, clientNameRaw, districtRaw, rawCityNameCell) {
+						slog.Warn("N61 без контекста אילת — пропускаем код города", "invoice", invoiceNum, "address", rawAddress, "client", clientNameRaw, "raw_city_col", rawCityNameCell)
+						return
+					}
+					inv.CityCode = c
+					return
+				}
+				slog.Warn("Код города не в формате МОЗ — не используем", "invoice", invoiceNum, "code", c, "address", rawAddress, "client", clientNameRaw)
+			}
+
+			// 0) Название города из колонки «עיר» / «ישוב» сырого отчёта — приоритет над כתובת и прочими эвристиками.
+			if rawCityNameCell != "" {
+				if code, _ := s.store.ResolveCityCode(rawCityNameCell); code != "" {
+					trySetCityCode(code)
+				}
+				if inv.CityCode == "" {
+					st := domain.StripCityPrefix(rawCityNameCell)
+					if code, _ := s.store.ResolveCityCode(st); code != "" {
+						trySetCityCode(code)
+					}
+				}
+				if inv.CityCode == "" {
+					key := domain.NormalizeCityLookupKey(rawCityNameCell)
+					if code, _ := s.store.ResolveCityCodeBySubstring(key); code != "" {
+						trySetCityCode(code)
+					}
+				}
+			}
+
 			cityStr := domain.ExtractCityFromAddress(rawAddress)
 			if cityStr != "" {
 				if code, _ := s.store.ResolveCityCode(cityStr); code != "" {
-					inv.CityCode = code
+					trySetCityCode(code)
 				}
 				if inv.CityCode == "" {
 					stripped := domain.StripCityPrefix(cityStr)
 					if code, _ := s.store.ResolveCityCode(stripped); code != "" {
-						inv.CityCode = code
+						trySetCityCode(code)
 					}
 				}
 				if inv.CityCode == "" {
 					if code, _ := s.store.ResolveCityCodeBySubstring(cityStr); code != "" {
-						inv.CityCode = code
+						trySetCityCode(code)
 					}
 				}
 			}
-			// Город часто указан только в названии клиента (שם לועזי), а כתובת пустая — напр. "רוסמן - מגדל העמק ביג".
+			// «רחוב, עיר» — город после первой запятой (напр. סוקולוב 63, חולון).
+			if inv.CityCode == "" && rawAddress != "" {
+				if _, after, ok := strings.Cut(rawAddress, ","); ok {
+					afterPart := domain.NormalizeText(strings.TrimSpace(after))
+					if afterPart != "" {
+						suffixMatched := false
+						if code, _ := s.store.ResolveCityCode(afterPart); code != "" {
+							trySetCityCode(code)
+							suffixMatched = true
+						}
+						if inv.CityCode == "" {
+							st := domain.StripCityPrefix(afterPart)
+							if st != afterPart {
+								if code, _ := s.store.ResolveCityCode(st); code != "" {
+									trySetCityCode(code)
+									suffixMatched = true
+								}
+							}
+						}
+						if inv.CityCode == "" {
+							if code, _ := s.store.ResolveCityCodeBySubstring(afterPart); code != "" {
+								trySetCityCode(code)
+								suffixMatched = true
+							}
+						}
+						if inv.CityCode != "" && suffixMatched {
+							inv.MoHCityAfterComma = true
+						}
+					}
+				}
+			}
+			// Полная כתובת: подстрочное совпадение с длинными алиасами (עיר, רחוב).
+			if inv.CityCode == "" && rawAddress != "" {
+				fullKey := domain.NormalizeCityLookupKey(rawAddress)
+				if code, _ := s.store.ResolveCityCodeBySubstring(fullKey); code != "" {
+					trySetCityCode(code)
+				}
+			}
+			// כתובת + שם לועזי: город может быть только в названии клиента, адрес — только улица.
+			if inv.CityCode == "" && rawAddress != "" && clientNameRaw != "" {
+				combo := domain.NormalizeCityLookupKey(strings.TrimSpace(rawAddress + " " + clientNameRaw))
+				if code, _ := s.store.ResolveCityCodeBySubstring(combo); code != "" {
+					trySetCityCode(code)
+				}
+			}
+			// שם לועזי: город внутри длинного названия (טיב טעם חולון 20); при пустой כתובת — ещё и точное совпадение.
 			if inv.CityCode == "" && clientNameRaw != "" {
 				lookup := domain.NormalizeCityLookupKey(clientNameRaw)
-				if code, _ := s.store.ResolveCityCode(lookup); code != "" {
-					inv.CityCode = code
+				if strings.TrimSpace(rawAddress) == "" {
+					if code, _ := s.store.ResolveCityCode(lookup); code != "" {
+						trySetCityCode(code)
+					}
 				}
 				if inv.CityCode == "" {
 					if code, _ := s.store.ResolveCityCodeBySubstring(lookup); code != "" {
-						inv.CityCode = code
+						trySetCityCode(code)
+					}
+				}
+			}
+			// מחוז: русское название округа — после כתובת и שם לועזי.
+			if inv.CityCode == "" && strings.TrimSpace(districtRaw) != "" {
+				dNorm := domain.NormalizeText(districtRaw)
+				if code, _ := s.store.ResolveCityCode(dNorm); code != "" {
+					trySetCityCode(code)
+				}
+				if inv.CityCode == "" {
+					if code, _ := s.store.ResolveCityCodeBySubstring(domain.NormalizeCityLookupKey(dNorm)); code != "" {
+						trySetCityCode(code)
+					}
+				}
+				if inv.CityCode == "" {
+					if heb, ok := domain.HebrewCityHintFromDistrictLabel(districtRaw); ok {
+						if code, _ := s.store.ResolveCityCode(heb); code != "" {
+							trySetCityCode(code)
+						}
 					}
 				}
 			}
 			if inv.CityCode == "" && hp != "" {
 				if c := s.store.GetClient(hp); c != nil && c.CityCode != "" {
-					inv.CityCode = c.CityCode
+					trySetCityCode(c.CityCode)
 				}
 			}
 			if inv.CityCode == "" {
-				if cityStr != "" {
+				if rawCityNameCell != "" {
+					inv.Errors = append(inv.Errors, fmt.Sprintf("Город из колонки сырого отчёта не найден в справочнике: %s", rawCityNameCell))
+				} else if cityStr != "" {
 					inv.Errors = append(inv.Errors, fmt.Sprintf("Город не найден: %s (Адрес: %s)", cityStr, rawAddress))
 				}
 				inv.Errors = append(inv.Errors, "Нет кода города: укажите адрес с городом или добавьте клиента с кодом города в справочник")
+			}
+
+			if inv.CityCode != "" && rawAddress != "" {
+				if domain.InferCityPlacedAfterComma(domain.NormalizeMinistryAddress(rawAddress)) {
+					inv.MoHCityAfterComma = true
+				}
 			}
 
 			// Водителя подставляем по городу доставки (в сыром отчёте колонки водителей нет)
@@ -229,7 +371,9 @@ findHeader:
 		item := s.store.GetItem(itemCode)
 		if item == nil {
 			if itemCode != "" {
-				inv.Errors = append(inv.Errors, fmt.Sprintf("Артикул %s не найден в справочнике товаров", itemCode))
+				// Не блокируем экспорт: вес уходит в UNKNOWN (кол. «נוסף א»); в справочник товаров можно добавить позже.
+				slog.Warn("Артикул не найден в справочнике — вес в отчёте как нераспределённый",
+					"invoice", invoiceNum, "item_code", itemCode, "kg", weightKg)
 			}
 			inv.Weights["UNKNOWN"] += weightKg
 		} else {

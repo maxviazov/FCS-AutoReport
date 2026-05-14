@@ -33,6 +33,61 @@ func StripCityPrefix(s string) string {
 	return s
 }
 
+// MoHStreetWithoutLeadingCity — для колонки «כתובת»: только улица и дом, без названия города в начале.
+// В сыром SAP часто «עיר, רחוב מספר»; в реестре נקודות שיווק город уже в קוד עיר.
+func MoHStreetWithoutLeadingCity(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	_, after, ok := strings.Cut(s, ",")
+	if !ok {
+		return s
+	}
+	return strings.TrimSpace(after)
+}
+
+// MoHStreetLineForMoH — одна строка כתובת: при «עיר, רחוב» (cityAfterComma=false) оставляем правую часть; при «רחוב, עיר» — левую.
+func MoHStreetLineForMoH(normalizedAddr string, cityAfterComma bool) string {
+	s := strings.TrimSpace(normalizedAddr)
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, ",") {
+		return s
+	}
+	if cityAfterComma {
+		before, _, ok := strings.Cut(s, ",")
+		if ok {
+			return strings.TrimSpace(before)
+		}
+		return s
+	}
+	return MoHStreetWithoutLeadingCity(s)
+}
+
+// InferCityPlacedAfterComma — эвристика без справочника: «улица с номером, город» (для post-export чужих файлов).
+func InferCityPlacedAfterComma(normalizedAddr string) bool {
+	s := strings.TrimSpace(normalizedAddr)
+	if s == "" || !strings.Contains(s, ",") {
+		return false
+	}
+	before, after, ok := strings.Cut(s, ",")
+	if !ok {
+		return false
+	}
+	b, a := strings.TrimSpace(before), strings.TrimSpace(after)
+	if b == "" || a == "" {
+		return false
+	}
+	digitLeft := strings.ContainsAny(b, "0123456789")
+	digitRight := strings.ContainsAny(a, "0123456789")
+	if digitLeft && !digitRight && len([]rune(a)) <= 24 {
+		return true
+	}
+	return false
+}
+
 // NormalizeMinistryAddress приводит כתובת к виду, который чаще совпадает с реестром נקודות שיווק:
 // «רח'»/типографская кавычка после «רח» → «רחוב», пробел перед запятой.
 func NormalizeMinistryAddress(addr string) string {

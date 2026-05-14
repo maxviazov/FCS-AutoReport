@@ -7,11 +7,17 @@ import (
 	"strings"
 )
 
-var mohCityCodePattern = regexp.MustCompile(`(?i)^[A-Z]\d{3,4}$`)
+// MoH публикует коды вида N126, N61, N610: одна латинская буква в верхнем регистре + 2–4 цифры (как в выгрузке реестра, без подмены регистра).
+var mohCityCodePattern = regexp.MustCompile(`^[A-Z]\d{2,4}$`)
 
-// IsMoHCityCodeFormat проверяет формат קוד עיר (буква + 3–4 цифры).
+// CanonicalMoHCityCode приводит код из Excel/БД к виду для проверки и экспорта (латинская буква в верхнем регистре).
+func CanonicalMoHCityCode(code string) string {
+	return strings.TrimSpace(strings.ToUpper(strings.TrimSpace(code)))
+}
+
+// IsMoHCityCodeFormat true, если строка в точности совпадает с форматом кода в реестре МОЗ.
 func IsMoHCityCodeFormat(code string) bool {
-	return mohCityCodePattern.MatchString(strings.TrimSpace(code))
+	return mohCityCodePattern.MatchString(CanonicalMoHCityCode(code))
 }
 
 // ClientHPDigits возвращает только цифры из ח"פ.
@@ -35,23 +41,28 @@ func ContainsCyrillic(s string) bool {
 	return false
 }
 
-// MoHAddressForReport — значение для колонки «כתובת»: полный адрес из SAP или fallback из שם לקוח (как в экспорте МОЗ).
-func MoHAddressForReport(addr, clientName string) string {
+// MoHAddressForReport — значение для колонки «כתובת»: адрес из SAP или fallback из שם לקוח; город убираем по правилам עיר,רחוב / רחוב,עיר (קוד в кол. J).
+func MoHAddressForReport(addr, clientName string, cityAfterComma bool) string {
 	addr = NormalizeText(addr)
+	var out string
 	if addr != "" {
-		return NormalizeMinistryAddress(addr)
-	}
-	clientName = NormalizeText(clientName)
-	if clientName == "" {
-		return ""
-	}
-	if _, after, ok := strings.Cut(clientName, " - "); ok {
-		after = strings.TrimSpace(after)
-		if after != "" {
-			return NormalizeMinistryAddress(after)
+		out = NormalizeMinistryAddress(addr)
+	} else {
+		clientName = NormalizeText(clientName)
+		if clientName == "" {
+			return ""
+		}
+		if _, after, ok := strings.Cut(clientName, " - "); ok {
+			after = strings.TrimSpace(after)
+			if after != "" {
+				out = NormalizeMinistryAddress(after)
+			}
+		}
+		if out == "" {
+			out = NormalizeMinistryAddress(clientName)
 		}
 	}
-	return NormalizeMinistryAddress(clientName)
+	return MoHStreetLineForMoH(out, cityAfterComma)
 }
 
 // RoundWeightKg округляет вес до 2 знаков (как в экспорте).
@@ -83,9 +94,9 @@ func ValidateInvoiceForMoHExport(inv *AggregatedInvoice) []string {
 	if code == "" {
 		add("пустой код города (קוד עיר)")
 	} else if !IsMoHCityCodeFormat(code) {
-		add(fmt.Sprintf("код города %q не в формате МОЗ (латинская буква и 3–4 цифры)", code))
+		add(fmt.Sprintf("код города %q не в формате МОЗ (латинская буква и 2–4 цифры)", code))
 	}
-	addr := MoHAddressForReport(inv.Address, inv.ClientName)
+	addr := MoHAddressForReport(inv.Address, inv.ClientName, inv.MoHCityAfterComma)
 	if strings.TrimSpace(addr) == "" {
 		add("пустой адрес (כתובת): заполните адрес в сыром файле или имя клиента для подстановки")
 	}
@@ -103,8 +114,15 @@ func ValidateInvoiceForMoHExport(inv *AggregatedInvoice) []string {
 		add("пустой телефон водителя (טלפון נהג)")
 	}
 	var tw float64
-	for _, kg := range inv.Weights {
+	for cat, kg := range inv.Weights {
+		if kg < 0 {
+			add(fmt.Sprintf("отрицательный вес по категории %q: %.3f кг", cat, kg))
+			continue
+		}
 		tw += kg
+	}
+	if inv.TotalBoxes < 0 {
+		add("отрицательное количество אריזות (קרטונים)")
 	}
 	if RoundWeightKg(tw) <= 0 {
 		add("нулевой суммарный вес по категориям МОЗ")

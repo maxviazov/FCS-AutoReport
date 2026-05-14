@@ -75,6 +75,9 @@ type AggregatedInvoice struct {
 	TotalBoxes float64
 	Weights    map[string]float64 // Категория Минздрава → вес в кг
 
+	// MoHCityAfterComma — в сыром כתובת формат «רחוב, עיר» (город после запятой); для колонки МОЗ убираем правую часть, не левую.
+	MoHCityAfterComma bool
+
 	// Валидация: список ошибок (не найден город, водитель, товар и т.д.)
 	Errors []string
 }

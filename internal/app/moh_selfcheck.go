@@ -49,7 +49,9 @@ func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc 
 	if city == "" {
 		add("קוד עיר пуст — ветслужба часто отклоняет")
 	} else if !domain.IsMoHCityCodeFormat(city) {
-		add(fmt.Sprintf("קוד עיר %q не похож на формат МОЗ (буква + 3–4 цифры)", city))
+		add(fmt.Sprintf("קוד עיר %q не похож на формат МОЗ (буква + 2–4 цифры)", city))
+	} else if city == "N61" && !domain.AllowMoHN61CityCode(addr, client, "", "") {
+		add("N61 (אילת): в כתובת нет признаков Эйлата — портал МОЗ часто отклоняет такую связку")
 	}
 	if addr == "" {
 		add("כתובת пустая — נקודת שיווק без адреса")
@@ -84,11 +86,27 @@ func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc 
 		add("מספר תעודת משלוח пуст")
 	}
 
+	for col := 15; col <= 27; col++ {
+		s := mohSelfCheckCell(f, sheet, col, row)
+		if s == "" {
+			continue
+		}
+		if n, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64); err == nil && n < 0 {
+			add(fmt.Sprintf("отрицательное значение в колонке %d: %s", col, s))
+		}
+	}
+
 	sum := calcWeightsSumForRow(f, sheet, row)
 	if roundWeight(sum) <= 0 {
 		add("нулевой суммарный вес по категориям (столбцы 15–25)")
 	}
+	boxStr := mohSelfCheckCell(f, sheet, 26, row)
 	totalStr := mohSelfCheckCell(f, sheet, 27, row)
+	if tw, errTw := strconv.ParseFloat(strings.ReplaceAll(totalStr, ",", "."), 64); errTw == nil && tw > 0 {
+		if b, errB := strconv.ParseFloat(strings.ReplaceAll(boxStr, ",", "."), 64); errB == nil && b > 0 && b < domain.MoHMinBoxesLightFraction {
+			add(fmt.Sprintf("סה\"כ קרטונים %.2f < порога МОЗ %.2f при положительном весе", b, domain.MoHMinBoxesLightFraction))
+		}
+	}
 	if totalStr != "" {
 		if total, err := strconv.ParseFloat(strings.ReplaceAll(totalStr, ",", "."), 64); err == nil {
 			if roundWeight(sum) != roundWeight(total) {

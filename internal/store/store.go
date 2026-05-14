@@ -281,18 +281,18 @@ func (s *Store) ResolveCityCode(rawCity string) (code string, err error) {
 		return "", fmt.Errorf("пустое значение города")
 	}
 	if c, ok := s.Cities[key]; ok {
-		return c.Code, nil
+		return domain.CanonicalMoHCityCode(c.Code), nil
 	}
 	if c, ok := s.CitiesByAlias[key]; ok {
-		return c.Code, nil
+		return domain.CanonicalMoHCityCode(c.Code), nil
 	}
 	keyAlt := domain.NormalizeCityLookupKey(rawCity)
 	if keyAlt != "" && keyAlt != key {
 		if c, ok := s.Cities[keyAlt]; ok {
-			return c.Code, nil
+			return domain.CanonicalMoHCityCode(c.Code), nil
 		}
 		if c, ok := s.CitiesByAlias[keyAlt]; ok {
-			return c.Code, nil
+			return domain.CanonicalMoHCityCode(c.Code), nil
 		}
 	}
 	return "", fmt.Errorf("не найден город %q: добавьте его в справочник или укажите как алиас", rawCity)
@@ -311,13 +311,25 @@ func (s *Store) ResolveCityCodeBySubstring(rawCity string) (code string, err err
 	var bestLen int
 	var bestCode string
 	for name, c := range s.Cities {
-		if name != "" && len(name) > bestLen && strings.Contains(key, name) {
+		if name == "" || len([]rune(name)) < 3 {
+			continue
+		}
+		if name == "אילות" && domain.CanonicalMoHCityCode(c.Code) == "N61" {
+			continue
+		}
+		if len(name) > bestLen && domain.CitySubstringMatchesToken(key, name) {
 			bestLen = len(name)
 			bestCode = c.Code
 		}
 	}
 	for alias, c := range s.CitiesByAlias {
-		if alias != "" && len(alias) > bestLen && strings.Contains(key, alias) {
+		if alias == "" || len([]rune(alias)) < 3 {
+			continue
+		}
+		if alias == "אילות" && domain.CanonicalMoHCityCode(c.Code) == "N61" {
+			continue
+		}
+		if len(alias) > bestLen && domain.CitySubstringMatchesToken(key, alias) {
 			bestLen = len(alias)
 			bestCode = c.Code
 		}
@@ -325,5 +337,5 @@ func (s *Store) ResolveCityCodeBySubstring(rawCity string) (code string, err err
 	if bestCode == "" {
 		return "", fmt.Errorf("город не найден по подстроке в %q", rawCity)
 	}
-	return bestCode, nil
+	return domain.CanonicalMoHCityCode(bestCode), nil
 }

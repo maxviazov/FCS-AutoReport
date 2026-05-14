@@ -27,6 +27,10 @@ func NormalizeText(s string) string {
 	b.Grow(len(s))
 	prevSpace := false
 	for _, r := range s {
+		// Направляющие метки RTL/LTR и вложенность из Excel — не считаем частью текста для справочников.
+		if r == '\u200e' || r == '\u200f' || r == '\u061c' || (r >= '\u202a' && r <= '\u202e') {
+			continue
+		}
 		if r == ' ' || spaceLikeRunes[r] || unicode.IsSpace(r) {
 			if !prevSpace {
 				b.WriteRune(' ')

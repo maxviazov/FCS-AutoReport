@@ -63,6 +63,56 @@ func roundWeight(kg float64) float64 {
 	return math.Round(kg*100) / 100
 }
 
+// normalizeMoHBoxColumn26 — колонка «אריזות» (26): любое число строго меньше MoHMinBoxesLightFraction
+// поднимается до порога (требование портала МОЗ).
+func normalizeMoHBoxColumn26(boxes float64) float64 {
+	b := roundWeight(boxes)
+	if b < domain.MoHMinBoxesLightFraction {
+		return domain.MoHMinBoxesLightFraction
+	}
+	return b
+}
+
+// setMoHBoxColumn26 записывает «סה"כ קרטונים» (кол. 26). Если в шаблоне в ячейке была формула,
+// одного SetCellValue недостаточно — сначала сбрасываем формулу, иначе в файле остаются некорректные значения.
+func setMoHBoxColumn26(f *excelize.File, sheet string, row int, value float64) {
+	cell, err := excelize.CoordinatesToCellName(26, row)
+	if err != nil {
+		return
+	}
+	if fm, _ := f.GetCellFormula(sheet, cell); strings.TrimSpace(fm) != "" {
+		if err := f.SetCellFormula(sheet, cell, ""); err != nil {
+			slog.Warn("Сброс формулы Z", "cell", cell, "err", err)
+		}
+	}
+	if err := f.SetCellValue(sheet, cell, value); err != nil {
+		slog.Error("Запись סה\"כ קרטונים", "cell", cell, "err", err)
+	}
+}
+
+// enforceMoHBoxColumn26ForDataRows — для строк с номером накладной (кол. 14) или положительным весом в кол. 27
+// перечитывает Z и поднимает значение до минимума МОЗ.
+func enforceMoHBoxColumn26ForDataRows(f *excelize.File, sheet string, lastRow int) {
+	for row := 2; row <= lastRow; row++ {
+		inv := strings.TrimSpace(mohSelfCheckCell(f, sheet, 14, row))
+		twStr := strings.TrimSpace(mohSelfCheckCell(f, sheet, 27, row))
+		tw, errTw := strconv.ParseFloat(strings.ReplaceAll(twStr, ",", "."), 64)
+		if inv == "" && (errTw != nil || tw <= 0) {
+			continue
+		}
+		cell, err := excelize.CoordinatesToCellName(26, row)
+		if err != nil {
+			continue
+		}
+		s, _ := f.GetCellValue(sheet, cell)
+		v, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(s), ",", "."), 64)
+		if err != nil {
+			v = 0
+		}
+		setMoHBoxColumn26(f, sheet, row, normalizeMoHBoxColumn26(v))
+	}
+}
+
 // Данные компании-поставщика (при необходимости вынести в domain.Settings).
 const (
 	SupplierName = "דולינה גרופ בע\"מ"
@@ -217,6 +267,64 @@ func validateAggregatedInvoicesForMoHExport(invoices []*domain.AggregatedInvoice
 	return &MohExportValidationError{Lines: lines}
 }
 
+// detectLastMoHDataRow — последняя строка с номером накладной (кол. 14); хвост шаблона без תעודה не считается данными.
+func detectLastMoHDataRow(f *excelize.File, sheet string, scanThrough int) int {
+	last := 0
+	for row := 2; row <= scanThrough; row++ {
+		inv := strings.TrimSpace(mohSelfCheckCell(f, sheet, 14, row))
+		if inv != "" {
+			last = row
+		}
+	}
+	return last
+}
+
+// clearMoHSheetTail очищает строки ниже данных и сжимает used range листа (остаток примера из шаблона даёт «чужие» числа и форматы в X–AB).
+func clearMoHSheetTail(f *excelize.File, sheet string, dataLastRow int) error {
+	if dataLastRow < 2 {
+		return nil
+	}
+	dim, err := f.GetSheetDimension(sheet)
+	if err != nil || strings.TrimSpace(dim) == "" {
+		return nil
+	}
+	parts := strings.Split(dim, ":")
+	if len(parts) != 2 {
+		return nil
+	}
+	startCol, startRow, err1 := excelize.CellNameToCoordinates(parts[0])
+	endCol, endRow, err2 := excelize.CellNameToCoordinates(parts[1])
+	if err1 != nil || err2 != nil {
+		if err1 != nil {
+			return err1
+		}
+		return err2
+	}
+	_ = startRow // обычно 1
+	newStart, err := excelize.CoordinatesToCellName(startCol, startRow)
+	if err != nil {
+		return err
+	}
+	newEnd, err := excelize.CoordinatesToCellName(endCol, dataLastRow)
+	if err != nil {
+		return err
+	}
+	if endRow <= dataLastRow {
+		return f.SetSheetDimension(sheet, newStart+":"+newEnd)
+	}
+	for row := dataLastRow + 1; row <= endRow; row++ {
+		for col := 1; col <= endCol; col++ {
+			cell, err := excelize.CoordinatesToCellName(col, row)
+			if err != nil {
+				continue
+			}
+			_ = f.SetCellFormula(sheet, cell, "")
+			_ = f.SetCellStr(sheet, cell, "")
+		}
+	}
+	return f.SetSheetDimension(sheet, newStart+":"+newEnd)
+}
+
 // exportAggregatedToPath заполняет шаблон и сохраняет по savePath (полный путь к .xlsx).
 func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, savePath string) error {
 	slog.Info("Экспорт в шаблон Минздрава", "invoices_count", len(invoices), "save_path", savePath)
@@ -276,8 +384,8 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		}
 		setCell(f, sheetName, clientCol, currentRow, cleanClientName)
 		setCell(f, sheetName, 9, currentRow, "קמעונאי")
-		setCell(f, sheetName, 10, currentRow, inv.CityCode)
-		setCell(f, sheetName, 11, currentRow, domain.MoHAddressForReport(inv.Address, inv.ClientName))
+		setCell(f, sheetName, 10, currentRow, strings.TrimSpace(inv.CityCode))
+		setCell(f, sheetName, 11, currentRow, domain.MoHAddressForReport(inv.Address, inv.ClientName, inv.MoHCityAfterComma))
 		setCell(f, sheetName, 13, currentRow, 0)
 		setCell(f, sheetName, 14, currentRow, numericOrString(inv.InvoiceNum))
 
@@ -287,6 +395,10 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		var totalWeight float64
 		colWeights := make(map[int]float64)
 		for category, weight := range inv.Weights {
+			if weight < 0 {
+				slog.Warn("Отрицательный вес по категории — в отчёт не попадёт", "invoice", inv.InvoiceNum, "category", category, "kg", weight)
+				continue
+			}
 			if category == "UNKNOWN" {
 				slog.Warn("Нераспределённый вес", "invoice", inv.InvoiceNum, "weight_kg", weight)
 			}
@@ -303,7 +415,14 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 			setCell(f, sheetName, colIdx, currentRow, roundWeight(w))
 		}
 
-		setCell(f, sheetName, 26, currentRow, roundWeight(inv.TotalBoxes))
+		boxesOut := normalizeMoHBoxColumn26(inv.TotalBoxes)
+		if boxesOut != roundWeight(inv.TotalBoxes) {
+			slog.Info("МОЗ: нормализация אריזות для портала",
+				"invoice", inv.InvoiceNum,
+				"raw_boxes", inv.TotalBoxes,
+				"exported_boxes", boxesOut)
+		}
+		setMoHBoxColumn26(f, sheetName, currentRow, boxesOut)
 		setCell(f, sheetName, 27, currentRow, roundWeight(totalWeight))
 		setCell(f, sheetName, 28, currentRow, 1)
 
@@ -311,13 +430,32 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 	}
 
 	lastRow := currentRow - 1
+	if err := clearMoHSheetTail(f, sheetName, lastRow); err != nil {
+		slog.Warn("Не удалось очистить хвост листа ниже строк данных", "sheet", sheetName, "data_last_row", lastRow, "err", err)
+	}
 	if lastRow >= 2 {
 		applyTemplateRow2Styles(f, sheetName, 2, lastRow)
+	}
+	// applyTemplateRow2Styles копирует стили диапазоном — в некоторых шаблонах значение колонки 26
+	// может снова стать как в строке 2 шаблона; повторно выставляем אריזות и итоговый вес.
+	for i, inv := range invoices {
+		row := 2 + i
+		var tw float64
+		for _, w := range inv.Weights {
+			if w < 0 {
+				continue
+			}
+			tw += w
+		}
+		setMoHBoxColumn26(f, sheetName, row, normalizeMoHBoxColumn26(inv.TotalBoxes))
+		setCell(f, sheetName, 27, row, roundWeight(tw))
 	}
 
 	for i, inv := range invoices {
 		setClientHPCell(f, sheetName, 12, 2+i, inv.ClientHP, clientHPStyleID)
 	}
+
+	enforceMoHBoxColumn26ForDataRows(f, sheetName, lastRow)
 
 	if err := f.SaveAs(savePath); err != nil {
 		return fmt.Errorf("сохранение отчёта: %w", err)
@@ -355,6 +493,25 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 	if lastRow < 2 {
 		lastRow = 2
 	}
+	// GetRows иногда обрезает хвост пустых строк — размер слайса может быть меньше,
+	// чем реальный последний ряд с данными; берём max с dimension листа.
+	if dim, err := exported.GetSheetDimension(eSheet); err == nil && dim != "" {
+		parts := strings.Split(dim, ":")
+		if len(parts) == 2 {
+			_, endRow, err := excelize.CellNameToCoordinates(parts[1])
+			if err == nil && endRow > lastRow {
+				lastRow = endRow
+			}
+		}
+	}
+
+	dataEnd := detectLastMoHDataRow(exported, eSheet, lastRow)
+	if dataEnd >= 2 {
+		if err := clearMoHSheetTail(exported, eSheet, dataEnd); err != nil {
+			slog.Warn("postExport: не удалось очистить хвост листа", "err", err)
+		}
+		lastRow = dataEnd
+	}
 
 	// 1) Приводим стили построчно по колонкам из строки 2 шаблона.
 	applyTemplateRow2Styles(exported, eSheet, 2, lastRow)
@@ -362,7 +519,19 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 	// 2) Обязательные формулы/типы по требованиям.
 	for row := 2; row <= lastRow; row++ {
 		normalizeDateCell(exported, eSheet, 4, row)
-		setCell(exported, eSheet, 27, row, roundWeight(calcWeightsSumForRow(exported, eSheet, row)))
+		sum := calcWeightsSumForRow(exported, eSheet, row)
+		setCell(exported, eSheet, 27, row, roundWeight(sum))
+		boxCell, err := excelize.CoordinatesToCellName(26, row)
+		if err != nil {
+			continue
+		}
+		boxStr, _ := exported.GetCellValue(eSheet, boxCell)
+		boxVal, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(boxStr), ",", "."), 64)
+		if err != nil {
+			boxVal = 0
+		}
+		fixed := normalizeMoHBoxColumn26(boxVal)
+		setMoHBoxColumn26(exported, eSheet, row, fixed)
 	}
 
 	// 3) Повторная очистка названия клиента (защита от спецсимволов).
@@ -375,6 +544,25 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 			_ = exported.SetCellValue(eSheet, cell, clean)
 		}
 	}
+
+	// 3b) כתובת (кол. 11) — только улица и дом: убираем префикс «город,» (город уже в קוד עיר).
+	for row := 2; row <= lastRow; row++ {
+		cell11, err := excelize.CoordinatesToCellName(11, row)
+		if err != nil {
+			continue
+		}
+		v, _ := exported.GetCellValue(eSheet, cell11)
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		norm := domain.NormalizeMinistryAddress(v)
+		street := domain.MoHStreetLineForMoH(norm, domain.InferCityPlacedAfterComma(norm))
+		if street != "" && street != strings.TrimSpace(v) {
+			_ = exported.SetCellValue(eSheet, cell11, street)
+		}
+	}
+
+	enforceMoHBoxColumn26ForDataRows(exported, eSheet, lastRow)
 
 	mohSelfCheckAfterExport(exported, eSheet, lastRow, exportPath)
 
@@ -563,7 +751,8 @@ func applyDataFormatting(f *excelize.File, sheet string, firstRow, lastRow int) 
 	if err != nil {
 		return
 	}
-	numCols := []int{2, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28}
+	// 26 — «סה"כ קרטונים»: значения задаёт только экспорт; массовый SetCellStyle по Z2:Z{n} не применять.
+	numCols := []int{2, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28}
 	for _, col := range numCols {
 		start, _ := excelize.CoordinatesToCellName(col, firstRow)
 		end, _ := excelize.CoordinatesToCellName(col, lastRow)
@@ -656,7 +845,7 @@ func calcWeightsSumForRow(f *excelize.File, sheet string, row int) float64 {
 		if err != nil {
 			continue
 		}
-		v = strings.TrimSpace(v)
+		v = strings.TrimSpace(strings.ReplaceAll(v, ",", "."))
 		if v == "" {
 			continue
 		}
@@ -674,6 +863,11 @@ func applyTemplateRow2Styles(f *excelize.File, sheet string, firstRow, lastRow i
 		return
 	}
 	for col := 1; col <= 28; col++ {
+		// Колонка 26 — «סה"כ קרטונים»: значение задаётся только кодом. SetCellStyle на диапазон Z2:Z{lastRow}
+		// тиражирует образец из Z2 на все строки и перетирает числа; колонку 26 из стилей исключаем.
+		if col == 26 {
+			continue
+		}
 		srcCell, err := excelize.CoordinatesToCellName(col, 2)
 		if err != nil {
 			continue
