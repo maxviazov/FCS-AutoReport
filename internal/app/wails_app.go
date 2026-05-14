@@ -275,6 +275,16 @@ func (a *WailsApp) GetLastUnresolvedCities() ([]string, error) {
 	return a.service.GetLastUnresolvedCities(), nil
 }
 
+// GetLastMohValidationFailures — нарушения проверки МОЗ (город, адрес, водитель и т.д.) после неудачного экспорта или отправки.
+func (a *WailsApp) GetLastMohValidationFailures() ([]string, error) {
+	return a.service.GetLastMohValidationFailures(), nil
+}
+
+// GetLastSkippedNoHPClients — накладные, исключённые из отчёта из‑за пустого ח\"פ (после последней успешной/частичной генерации).
+func (a *WailsApp) GetLastSkippedNoHPClients() ([]string, error) {
+	return a.service.GetLastSkippedNoHPClients(), nil
+}
+
 // AddCityAlias добавляет алиас к существующему городу по ID и перезагружает кэш.
 // alias — строка из отчёта (например "תל אביב"), которая будет подставляться к городу с данным id.
 func (a *WailsApp) AddCityAlias(cityID int, alias string) error {

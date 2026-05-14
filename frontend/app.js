@@ -201,6 +201,14 @@
       const savedPath = await backend.GenerateReport(raw, template, output);
       log(tr("msg_done") + ": " + savedPath, "success");
       log(tr("msg_savedPaths"));
+      if (typeof backend.GetLastSkippedNoHPClients === "function") {
+        try {
+          var skipped = await backend.GetLastSkippedNoHPClients();
+          if (skipped && skipped.length) {
+            log(tr("msg_skippedNoHPLog") + " " + skipped.join("; "), "warning");
+          }
+        } catch (e) {}
+      }
       setLastReportPath(savedPath);
       if (generateStatusEl) {
         generateStatusEl.textContent = tr("msg_done") + ": " + savedPath;
@@ -229,6 +237,18 @@
           } catch (e) {}
         }
         showUnresolvedModal(unresolved, backend);
+      } else if (errMsg.indexOf("moh_export_blocked") !== -1) {
+        log(errMsg, "error");
+        if (generateStatusEl) {
+          generateStatusEl.textContent = tr("msg_mohExportBlockedShort");
+          generateStatusEl.className = "generate-status error";
+        }
+        if (typeof backend.GetLastMohValidationFailures === "function") {
+          try {
+            var vlines = await backend.GetLastMohValidationFailures();
+            showMohValidationModal(vlines || []);
+          } catch (e) {}
+        }
       } else {
         log(errMsg, "error");
         if (generateStatusEl) {
@@ -337,6 +357,35 @@
     modal.style.display = "flex";
   }
 
+  function showMohValidationModal(lines) {
+    var modal = document.getElementById("mohValidationModal");
+    var listEl = document.getElementById("mohValidationList");
+    if (!modal || !listEl) return;
+    listEl.innerHTML = "";
+    (lines || []).forEach(function (line) {
+      var row = document.createElement("div");
+      row.className = "unresolved-row";
+      row.textContent = line;
+      listEl.appendChild(row);
+    });
+    modal.style.display = "flex";
+  }
+
+  var btnMohValidationOk = document.getElementById("btnMohValidationOk");
+  if (btnMohValidationOk) {
+    btnMohValidationOk.addEventListener("click", function () {
+      var modal = document.getElementById("mohValidationModal");
+      if (modal) modal.style.display = "none";
+    });
+  }
+
+  var mohValidationModalEl = document.getElementById("mohValidationModal");
+  if (mohValidationModalEl) {
+    mohValidationModalEl.addEventListener("click", function (e) {
+      if (e.target.id === "mohValidationModal") e.target.style.display = "none";
+    });
+  }
+
   document.getElementById("btnUnresolvedDone").addEventListener("click", function () {
     var modal = document.getElementById("unresolvedModal");
     if (modal) modal.style.display = "none";
@@ -372,6 +421,14 @@
       var savedPath = await backend.GenerateReport(raw, template, output);
       setStatus("", false);
       log(tr("msg_done") + ": " + savedPath, "success");
+      if (typeof backend.GetLastSkippedNoHPClients === "function") {
+        try {
+          var skippedR = await backend.GetLastSkippedNoHPClients();
+          if (skippedR && skippedR.length) {
+            log(tr("msg_skippedNoHPLog") + " " + skippedR.join("; "), "warning");
+          }
+        } catch (e) {}
+      }
       setLastReportPath(savedPath);
       if (generateStatusEl) {
         generateStatusEl.textContent = tr("msg_done") + ": " + savedPath;
@@ -391,6 +448,14 @@
           var unresolved = await backend.GetLastUnresolvedCities();
           showUnresolvedModal(unresolved || [], backend);
         } catch (e) {}
+      } else if (errMsg.indexOf("moh_export_blocked") !== -1) {
+        setStatus(tr("msg_mohExportBlockedShort"), true);
+        if (typeof backend.GetLastMohValidationFailures === "function") {
+          try {
+            var vlines2 = await backend.GetLastMohValidationFailures();
+            showMohValidationModal(vlines2 || []);
+          } catch (e) {}
+        }
       }
     } finally {
       if (btn) btn.disabled = false;
@@ -1005,7 +1070,17 @@
       log("Отправка выполнена: " + reportPath, "success");
       await refreshOutboxAndResults();
     } catch (e) {
-      log((e && e.message ? e.message : String(e)), "error");
+      var sendErr = e && e.message ? e.message : String(e);
+      log(sendErr, "error");
+      if (sendErr.indexOf("moh_send_blocked") !== -1) {
+        log(tr("msg_mohSendBlockedShort"), "error");
+        if (typeof backend.GetLastMohValidationFailures === "function") {
+          try {
+            var vlines3 = await backend.GetLastMohValidationFailures();
+            showMohValidationModal(vlines3 || []);
+          } catch (e2) {}
+        }
+      }
     }
   }
 

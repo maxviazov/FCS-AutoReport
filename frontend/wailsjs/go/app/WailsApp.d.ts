@@ -22,6 +22,12 @@ export function GetDrivers():Promise<Array<domain.Driver>>;
 
 export function GetItems():Promise<Array<domain.Item>>;
 
+export function GetLastManualReviewFiles():Promise<Array<string>>;
+
+export function GetLastMohValidationFailures():Promise<Array<string>>;
+
+export function GetLastSkippedNoHPClients():Promise<Array<string>>;
+
 export function GetLastUnresolvedCities():Promise<Array<string>>;
 
 export function GetOutboxJobs(arg1:number):Promise<Array<domain.OutboxJob>>;

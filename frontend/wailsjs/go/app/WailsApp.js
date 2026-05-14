@@ -42,6 +42,18 @@ export function GetItems() {
   return window['go']['app']['WailsApp']['GetItems']();
 }
 
+export function GetLastManualReviewFiles() {
+  return window['go']['app']['WailsApp']['GetLastManualReviewFiles']();
+}
+
+export function GetLastMohValidationFailures() {
+  return window['go']['app']['WailsApp']['GetLastMohValidationFailures']();
+}
+
+export function GetLastSkippedNoHPClients() {
+  return window['go']['app']['WailsApp']['GetLastSkippedNoHPClients']();
+}
+
 export function GetLastUnresolvedCities() {
   return window['go']['app']['WailsApp']['GetLastUnresolvedCities']();
 }

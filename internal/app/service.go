@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,9 +35,11 @@ const (
 type ReportService struct {
 	db             *db.DB
 	store          *store.Store
-	mu             sync.Mutex
-	lastUnresolved []string // уникальные названия городов/адреса, не распознанные при последней агрегации
-	lastManualReview []string
+	mu                 sync.Mutex
+	lastUnresolved     []string // уникальные названия городов/адреса, не распознанные при последней агрегации
+	lastManualReview   []string
+	lastMohValidation  []string // последние нарушения проверки МОЗ (экспорт или отправка) — для UI
+	lastSkippedNoHP    []string // строки «накладная — клиент» без ח\"פ, исключённые из отчёта
 	bgCancel       context.CancelFunc
 	lastResetDate  string
 }
@@ -209,6 +212,52 @@ func (s *ReportService) GetLastManualReviewFiles() []string {
 	return out
 }
 
+// SetLastMohValidationFailures сохраняет список нарушений проверки МОЗ для показа в UI (модальное окно).
+func (s *ReportService) SetLastMohValidationFailures(lines []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(lines) == 0 {
+		s.lastMohValidation = nil
+		return
+	}
+	s.lastMohValidation = append([]string(nil), lines...)
+}
+
+// GetLastMohValidationFailures возвращает копию последних нарушений (пусто после успешной генерации).
+func (s *ReportService) GetLastMohValidationFailures() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.lastMohValidation) == 0 {
+		return nil
+	}
+	out := make([]string, len(s.lastMohValidation))
+	copy(out, s.lastMohValidation)
+	return out
+}
+
+// SetLastSkippedNoHPClients сохраняет накладные, исключённые из отчёта из‑за пустого ח\"פ.
+func (s *ReportService) SetLastSkippedNoHPClients(lines []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(lines) == 0 {
+		s.lastSkippedNoHP = nil
+		return
+	}
+	s.lastSkippedNoHP = append([]string(nil), lines...)
+}
+
+// GetLastSkippedNoHPClients — копия списка «накладная — клиент» без ח\"פ (информационно после успешной генерации).
+func (s *ReportService) GetLastSkippedNoHPClients() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.lastSkippedNoHP) == 0 {
+		return nil
+	}
+	out := make([]string, len(s.lastSkippedNoHP))
+	copy(out, s.lastSkippedNoHP)
+	return out
+}
+
 func DedupKey(invoiceNum, clientName string) string {
 	return domain.NormalizeText(invoiceNum) + "|" + domain.NormalizeText(clientName)
 }
@@ -261,6 +310,13 @@ func (s *ReportService) QueueReportForAutoSend(reportPath string) (int, error) {
 }
 
 func (s *ReportService) SendQueuedReport(reportPath string) error {
+	if err := ValidateMoHReportFile(reportPath); err != nil {
+		var se *MohSendValidationError
+		if errors.As(err, &se) {
+			s.SetLastMohValidationFailures(se.Lines)
+		}
+		return fmt.Errorf("проверка отчёта МОЗ: %w", err)
+	}
 	settings, err := s.db.GetSettings()
 	if err != nil {
 		return err
@@ -284,28 +340,29 @@ func (s *ReportService) SendQueuedReport(reportPath string) error {
 }
 
 func (s *ReportService) GenerateAndQueueFromRaw(rawFilePath, templatePath, outputDir string) (string, error) {
+	s.SetLastMohValidationFailures(nil)
+	s.SetLastSkippedNoHPClients(nil)
 	invoices, err := s.ProcessRawReport(rawFilePath)
 	if err != nil {
 		return "", fmt.Errorf("обработка сырого файла: %w", err)
 	}
 	// Частные покупатели без ח.פ не участвуют в отчётности.
+	var skippedNoHP []string
 	reportable := make([]*domain.AggregatedInvoice, 0, len(invoices))
 	for _, inv := range invoices {
 		hp := domain.NormalizeText(inv.ClientHP)
 		if hp == "" || hp == "0" {
+			skippedNoHP = append(skippedNoHP, fmt.Sprintf("%s — %s",
+				domain.NormalizeText(inv.InvoiceNum), domain.NormalizeText(inv.ClientName)))
 			continue
 		}
 		reportable = append(reportable, inv)
 	}
+	s.SetLastSkippedNoHPClients(skippedNoHP)
 	if len(reportable) == 0 {
 		return "", fmt.Errorf("нет строк для отчётности (все записи без ח.פ)")
 	}
 	s.SetLastUnresolvedCities(reportable)
-	for _, inv := range reportable {
-		if strings.TrimSpace(inv.CityCode) == "" {
-			return "", fmt.Errorf("unresolved_cities: добавьте алиасы для городов без кода; отправка невозможна")
-		}
-	}
 	if err := s.EnsureDailyReset(); err != nil {
 		return "", fmt.Errorf("суточный сброс: %w", err)
 	}
@@ -325,6 +382,12 @@ func (s *ReportService) GenerateAndQueueFromRaw(rawFilePath, templatePath, outpu
 	if exportPerClient {
 		runDir, exports, manualReview, err := ExportPerClientToRunFolder(outputDir, templatePath, filtered)
 		if err != nil {
+			var me *MohExportValidationError
+			if errors.As(err, &me) {
+				s.SetLastMohValidationFailures(me.Lines)
+			} else {
+				s.SetLastMohValidationFailures(nil)
+			}
 			return "", err
 		}
 		s.SetLastManualReviewFiles(manualReview)
@@ -352,12 +415,19 @@ func (s *ReportService) GenerateAndQueueFromRaw(rawFilePath, templatePath, outpu
 				}
 			}
 		}
+		s.SetLastMohValidationFailures(nil)
 		return runDir, nil
 	}
 	s.SetLastManualReviewFiles(nil)
 
 	savedPath, err := ExportToExcel(filtered, templatePath, outputDir)
 	if err != nil {
+		var me *MohExportValidationError
+		if errors.As(err, &me) {
+			s.SetLastMohValidationFailures(me.Lines)
+		} else {
+			s.SetLastMohValidationFailures(nil)
+		}
 		return "", err
 	}
 	if err := s.MarkInvoicesSent(filtered, savedPath); err != nil {
@@ -372,6 +442,7 @@ func (s *ReportService) GenerateAndQueueFromRaw(rawFilePath, templatePath, outpu
 			slog.Warn("auto send failed", "report", savedPath, "err", err)
 		}
 	}
+	s.SetLastMohValidationFailures(nil)
 	return savedPath, nil
 }
 

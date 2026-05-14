@@ -76,7 +76,7 @@ findHeader:
 			if strings.Contains(n, "משקל") {
 				weightCol = j
 			}
-			if strings.Contains(n, "קרטון") {
+			if strings.Contains(n, "קרטון") || strings.Contains(n, "אריזות") {
 				boxesCol = j
 			}
 		}

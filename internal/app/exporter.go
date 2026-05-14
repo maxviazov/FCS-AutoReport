@@ -200,9 +200,30 @@ func clientExportFileStem(inv *domain.AggregatedInvoice) string {
 	return base
 }
 
+// validateAggregatedInvoicesForMoHExport блокирует экспорт, если любая накладная не соответствует требованиям МОЗ.
+func validateAggregatedInvoicesForMoHExport(invoices []*domain.AggregatedInvoice) error {
+	if len(invoices) == 0 {
+		return &MohExportValidationError{Lines: []string{"нет накладных для экспорта"}}
+	}
+	var lines []string
+	for _, inv := range invoices {
+		for _, msg := range domain.ValidateInvoiceForMoHExport(inv) {
+			lines = append(lines, fmt.Sprintf("%s / %s: %s", inv.InvoiceNum, inv.ClientName, msg))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return &MohExportValidationError{Lines: lines}
+}
+
 // exportAggregatedToPath заполняет шаблон и сохраняет по savePath (полный путь к .xlsx).
 func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, savePath string) error {
 	slog.Info("Экспорт в шаблон Минздрава", "invoices_count", len(invoices), "save_path", savePath)
+
+	if err := validateAggregatedInvoicesForMoHExport(invoices); err != nil {
+		return err
+	}
 
 	f, err := excelize.OpenFile(templatePath)
 	if err != nil {
@@ -237,9 +258,6 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 	currentRow := 2
 
 	for _, inv := range invoices {
-		if inv.CityCode == "" {
-			slog.Warn("Накладная без кода города — выводится с пустыми полями города/водителя", "invoice", inv.InvoiceNum, "client", inv.ClientName)
-		}
 		setCell(f, sheetName, 1, currentRow, SupplierName)
 		setCell(f, sheetName, 2, currentRow, 511777856)
 		setCell(f, sheetName, 3, currentRow, MoHNumber)
@@ -259,7 +277,7 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 		setCell(f, sheetName, clientCol, currentRow, cleanClientName)
 		setCell(f, sheetName, 9, currentRow, "קמעונאי")
 		setCell(f, sheetName, 10, currentRow, inv.CityCode)
-		setCell(f, sheetName, 11, currentRow, mohAddressCellWithFallback(inv.Address, inv.ClientName))
+		setCell(f, sheetName, 11, currentRow, domain.MoHAddressForReport(inv.Address, inv.ClientName))
 		setCell(f, sheetName, 13, currentRow, 0)
 		setCell(f, sheetName, 14, currentRow, numericOrString(inv.InvoiceNum))
 
@@ -357,6 +375,8 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 			_ = exported.SetCellValue(eSheet, cell, clean)
 		}
 	}
+
+	mohSelfCheckAfterExport(exported, eSheet, lastRow, exportPath)
 
 	if err := exported.Save(); err != nil {
 		return true, fmt.Sprintf("сохранение после авто-доработки: %v", err)
@@ -526,48 +546,6 @@ func numericOrString(s string) interface{} {
 		return roundWeight(f)
 	}
 	return s
-}
-
-// streetFromAddress возвращает часть адреса после первой запятой (улица без города) или весь адрес, если запятой нет.
-func streetFromAddress(addr string) string {
-	_, after, ok := strings.Cut(strings.TrimSpace(addr), ",")
-	if !ok {
-		return strings.TrimSpace(addr)
-	}
-	return strings.TrimSpace(after)
-}
-
-// mohAddressCell — колонка «כתובת» в шаблоне МОЗ: при формате «город, улица» в сыром файле передаём улицу
-// (город уже в «קוד עיר»). Если запятой нет — всю строку.
-func mohAddressCell(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return ""
-	}
-	if !strings.Contains(addr, ",") {
-		return addr
-	}
-	return streetFromAddress(addr)
-}
-
-// mohAddressCellWithFallback — при пустом כתובת в SAP подставляет точку из названия клиента
-// (часть после « - »), напр. «רוסמן - מגדל העמק ביג» → «מגדל העמק ביג». Иначе ветслужба отклоняет «נקודות שיווק».
-func mohAddressCellWithFallback(addr, clientName string) string {
-	cell := mohAddressCell(addr)
-	if cell != "" {
-		return cell
-	}
-	clientName = domain.NormalizeText(clientName)
-	if clientName == "" {
-		return ""
-	}
-	if _, after, ok := strings.Cut(clientName, " - "); ok {
-		after = strings.TrimSpace(after)
-		if after != "" {
-			return after
-		}
-	}
-	return clientName
 }
 
 // applyDataFormatting задаёт числовой формат для колонок с числами (с теми же бордюрами и выравниванием, чтобы не затереть стиль).

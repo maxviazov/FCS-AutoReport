@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // ExtractCityFromAddress вычленяет название города из сырого адреса.
 // Берётся часть до первой запятой, затем нормализация пробелов.
@@ -29,3 +32,24 @@ func StripCityPrefix(s string) string {
 	}
 	return s
 }
+
+// NormalizeMinistryAddress приводит כתובת к виду, который чаще совпадает с реестром נקודות שיווק:
+// «רח'»/типографская кавычка после «רח» → «רחוב», пробел перед запятой.
+func NormalizeMinistryAddress(addr string) string {
+	s := NormalizeText(addr)
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "רח'", "רחוב")
+	s = strings.ReplaceAll(s, "רח׳", "רחוב")
+	s = strings.ReplaceAll(s, "רח\u2018", "רחוב")
+	s = strings.ReplaceAll(s, "רח\u2019", "רחוב")
+	s = strings.ReplaceAll(s, "רח`", "רחוב")
+	s = strings.ReplaceAll(s, " ,", ",")
+	// «2,עד» после удаления пробела перед запятой — добавляем пробел после запятой.
+	s = commaNeedSpaceAfter.ReplaceAllString(s, ", $1")
+	return NormalizeText(s)
+}
+
+// Запятая, за которой сразу идёт непробельный символ (кроме цифры) — вставить пробел.
+var commaNeedSpaceAfter = regexp.MustCompile(`,([^\s\d])`)
