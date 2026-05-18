@@ -104,15 +104,7 @@ func ValidateInvoiceForMoHExport(inv *AggregatedInvoice) []string {
 	if len(d) < 8 || len(d) > 9 {
 		add(fmt.Sprintf("ח\"פ: нужно 8–9 цифр, сейчас %d", len(d)))
 	}
-	if strings.TrimSpace(inv.DriverName) == "" {
-		add("не назначен водитель (שם הנהג) для кода города")
-	}
-	if strings.TrimSpace(inv.CarNumber) == "" {
-		add("пустой номер ТС (מס.רכב)")
-	}
-	if strings.TrimSpace(inv.Phone) == "" {
-		add("пустой телефон водителя (טלפון נהג)")
-	}
+	// רכב/נהג: не блокируем экспорт — см. moh_selfcheck (подсказка в sidecar).
 	var tw float64
 	for cat, kg := range inv.Weights {
 		if kg < 0 {

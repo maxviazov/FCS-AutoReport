@@ -212,8 +212,7 @@ func sanitizeClientFileBase(name string) string {
 	return s
 }
 
-// sanitizeClientName очищает название клиента перед экспортом:
-// удаляет кавычки/знаки пунктуации/прочие спецсимволы, оставляет буквы, цифры и пробел.
+// sanitizeClientName очищает название клиента: буквы, цифры, пробел; сохраняет גרשיים в «בע"מ».
 func sanitizeClientName(name string) string {
 	name = domain.NormalizeText(name)
 	if name == "" {
@@ -225,6 +224,9 @@ func sanitizeClientName(name string) string {
 	for _, r := range name {
 		switch {
 		case unicode.IsLetter(r), unicode.IsNumber(r):
+			b.WriteRune(r)
+			prevSpace = false
+		case r == '"', r == '\'', r == '״', r == '׳', r == '-', r == '.':
 			b.WriteRune(r)
 			prevSpace = false
 		case unicode.IsSpace(r):
@@ -465,6 +467,23 @@ func exportAggregatedToPath(invoices []*domain.AggregatedInvoice, templatePath, 
 }
 
 // postExportValidateAndRepair выполняет авто-проверку и авто-доработку экспортированного файла.
+// mohStreetFromPostExportAddress — второй проход по кол. «כתובת» только для «רחוב, עיר».
+// Не трогаем «רחוב, מספר» (напр. «קרן היסוד, 68»).
+func mohStreetFromPostExportAddress(v string) (street string, ok bool) {
+	norm := domain.NormalizeMinistryAddress(v)
+	if norm == "" {
+		return "", false
+	}
+	if !domain.InferCityPlacedAfterComma(norm) {
+		return "", false
+	}
+	street = domain.MoHStreetLineForMoH(norm, true)
+	if street == "" {
+		return "", false
+	}
+	return street, true
+}
+
 // Возвращает needsManual=true, если файл невозможно автоматически привести к требованиям.
 func postExportValidateAndRepair(exportPath, templatePath string) (needsManual bool, reason string) {
 	template, err := excelize.OpenFile(templatePath)
@@ -545,19 +564,15 @@ func postExportValidateAndRepair(exportPath, templatePath string) (needsManual b
 		}
 	}
 
-	// 3b) כתובת (кол. 11) — только улица и дом: убираем префикс «город,» (город уже в קוד עיר).
+	// 3b) כתובת — только «רחוב, עיר» (город в конце). «עיר, רחוב» уже нормализовано в MoHAddressForReport;
+	// повторный Cut по запятой ломает «קרן היסוד, 68» → «68».
 	for row := 2; row <= lastRow; row++ {
 		cell11, err := excelize.CoordinatesToCellName(11, row)
 		if err != nil {
 			continue
 		}
 		v, _ := exported.GetCellValue(eSheet, cell11)
-		if strings.TrimSpace(v) == "" {
-			continue
-		}
-		norm := domain.NormalizeMinistryAddress(v)
-		street := domain.MoHStreetLineForMoH(norm, domain.InferCityPlacedAfterComma(norm))
-		if street != "" && street != strings.TrimSpace(v) {
+		if street, ok := mohStreetFromPostExportAddress(v); ok && street != strings.TrimSpace(v) {
 			_ = exported.SetCellValue(eSheet, cell11, street)
 		}
 	}
@@ -794,6 +809,8 @@ func setReportDateCell(f *excelize.File, sheet string, col, row int, raw string)
 		if err := f.SetCellValue(sheet, cellName, dt); err != nil {
 			slog.Warn("Не удалось записать дату как date, используем исходную строку", "cell", cellName, "err", err)
 			_ = f.SetCellValue(sheet, cellName, strings.TrimSpace(raw))
+		} else {
+			setMoHDateCellStyle(f, sheet, cellName)
 		}
 		return
 	}
@@ -831,7 +848,27 @@ func normalizeDateCell(f *excelize.File, sheet string, col, row int) {
 	}
 	if dt, ok := parseReportDate(v); ok {
 		_ = f.SetCellValue(sheet, cellName, dt)
+		setMoHDateCellStyle(f, sheet, cellName)
 	}
+}
+
+var mohDateDisplayFmt = "dd.mm.yyyy"
+
+func setMoHDateCellStyle(f *excelize.File, sheet, cellName string) {
+	styleID, err := f.GetCellStyle(sheet, cellName)
+	if err != nil {
+		return
+	}
+	style, err := f.GetStyle(styleID)
+	if err != nil || style == nil {
+		style = &excelize.Style{}
+	}
+	style.CustomNumFmt = &mohDateDisplayFmt
+	newID, err := f.NewStyle(style)
+	if err != nil {
+		return
+	}
+	_ = f.SetCellStyle(sheet, cellName, cellName, newID)
 }
 
 func calcWeightsSumForRow(f *excelize.File, sheet string, row int) float64 {

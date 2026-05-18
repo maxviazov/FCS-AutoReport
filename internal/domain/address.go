@@ -88,6 +88,21 @@ func InferCityPlacedAfterComma(normalizedAddr string) bool {
 	return false
 }
 
+// stripPathSuffix убирает \ или / и всё после (артефакт SAP/Excel, напр. «העצמאות 23\87», «שבי ציון 2/124»).
+func stripPathSuffix(s string) string {
+	cut := -1
+	if i := strings.IndexByte(s, '\\'); i >= 0 {
+		cut = i
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 && (cut < 0 || i < cut) {
+		cut = i
+	}
+	if cut >= 0 {
+		s = strings.TrimSpace(s[:cut])
+	}
+	return s
+}
+
 // NormalizeMinistryAddress приводит כתובת к виду, который чаще совпадает с реестром נקודות שיווק:
 // «רח'»/типографская кавычка после «רח» → «רחוב», пробел перед запятой.
 func NormalizeMinistryAddress(addr string) string {
@@ -95,6 +110,7 @@ func NormalizeMinistryAddress(addr string) string {
 	if s == "" {
 		return ""
 	}
+	s = stripPathSuffix(s)
 	s = strings.ReplaceAll(s, "רח'", "רחוב")
 	s = strings.ReplaceAll(s, "רח׳", "רחוב")
 	s = strings.ReplaceAll(s, "רח\u2018", "רחוב")

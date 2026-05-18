@@ -145,21 +145,39 @@ func parseCityCodes(s string) []string {
 	return out
 }
 
-// GetDriverForCity возвращает водителя для подстановки в запись по коду города доставки.
-// Сначала ищет водителя, у которого в city_codes есть этот город; если нет — любого водителя (fallback).
+// GetDriverForCity возвращает водителя, у которого в city_codes есть код города доставки.
+// Случайный fallback убран — иначе в отчёт попадает чужой רכב/נהג (отказ MoH).
 func (s *Store) GetDriverForCity(cityCode string) *domain.Driver {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	code := strings.TrimSpace(strings.ToUpper(cityCode))
-	if code != "" {
-		if list := s.DriversByCity[code]; len(list) > 0 {
-			return list[0]
-		}
+	if code == "" {
+		return nil
 	}
-	for _, d := range s.Drivers {
-		return d
+	if list := s.DriversByCity[code]; len(list) > 0 {
+		return list[0]
 	}
 	return nil
+}
+
+// GetDriverForCityOrDistrict — город по коду; если водителя нет — пробуем подсказку из «מחוז» (кириллица FishKA).
+func (s *Store) GetDriverForCityOrDistrict(cityCode, district string) *domain.Driver {
+	if d := s.GetDriverForCity(cityCode); d != nil {
+		return d
+	}
+	district = strings.TrimSpace(district)
+	if district == "" {
+		return nil
+	}
+	heb, ok := domain.HebrewCityHintFromDistrictLabel(district)
+	if !ok {
+		return nil
+	}
+	code, err := s.ResolveCityCode(heb)
+	if err != nil || code == "" {
+		return nil
+	}
+	return s.GetDriverForCity(code)
 }
 
 // GetDriver возвращает водителя по имени агента (nil если не найден).

@@ -51,6 +51,8 @@ func (s *ReportService) ProcessRawReport(rawFilePath string) ([]*domain.Aggregat
 	addressCol := -1
 	rawCityNameCol := -1 // явное название города в сыром отчёте (עיר / שם עיר / ישוב)
 	itemCodeCol := -1
+	itemGroupCol := -1
+	itemDescCol := -1
 	districtCol := -1
 	weightCol := 25   // סה"כ משקל или משקל
 	boxesCol := 23
@@ -77,6 +79,12 @@ findHeader:
 			}
 			if itemCodeCol < 0 && (n == "קוד פריט" || (strings.Contains(n, "קוד") && strings.Contains(n, "פריט"))) {
 				itemCodeCol = j
+			}
+			if itemGroupCol < 0 && (n == "שם קבוצה" || (strings.Contains(n, "קבוצה") && strings.Contains(n, "שם"))) {
+				itemGroupCol = j
+			}
+			if itemDescCol < 0 && (n == "תיאור פריט" || (strings.Contains(n, "תיאור") && strings.Contains(n, "פריט"))) {
+				itemDescCol = j
 			}
 			if rawCityNameCol < 0 {
 				switch n {
@@ -153,7 +161,20 @@ findHeader:
 		if rawCityNameCol >= 0 {
 			rawCityNameCell = domain.NormalizeText(getCol(rawCityNameCol))
 		}
-		itemCode := domain.NormalizeText(getCol(15))
+		itemCode := ""
+		if itemCodeCol >= 0 {
+			itemCode = domain.NormalizeText(getCol(itemCodeCol))
+		} else {
+			itemCode = domain.NormalizeText(getCol(15))
+		}
+		itemGroup := ""
+		if itemGroupCol >= 0 {
+			itemGroup = domain.NormalizeText(getCol(itemGroupCol))
+		}
+		itemDesc := ""
+		if itemDescCol >= 0 {
+			itemDesc = domain.NormalizeText(getCol(itemDescCol))
+		}
 		boxesStr := getCol(boxesCol)
 		weightStr := getCol(weightCol)
 
@@ -220,6 +241,12 @@ findHeader:
 			}
 
 			// 0) Название города из колонки «עיר» / «ישוב» сырого отчёта — приоритет над כתובת и прочими эвристиками.
+			// 0b) קוד עיר из карточки клиента (ח"פ) — после колонки «עיר», но до כתובת (исправления вроде F1373 вместо M37).
+			if hp != "" {
+				if c := s.store.GetClient(hp); c != nil && strings.TrimSpace(c.CityCode) != "" {
+					trySetCityCode(c.CityCode)
+				}
+			}
 			if rawCityNameCell != "" {
 				if code, _ := s.store.ResolveCityCode(rawCityNameCell); code != "" {
 					trySetCityCode(code)
@@ -238,7 +265,7 @@ findHeader:
 				}
 			}
 
-			cityStr := domain.ExtractCityFromAddress(rawAddress)
+			cityStr := domain.AdjustCityFromFishKA(domain.ExtractCityFromAddress(rawAddress), districtRaw)
 			if cityStr != "" {
 				if code, _ := s.store.ResolveCityCode(cityStr); code != "" {
 					trySetCityCode(code)
@@ -333,11 +360,6 @@ findHeader:
 					}
 				}
 			}
-			if inv.CityCode == "" && hp != "" {
-				if c := s.store.GetClient(hp); c != nil && c.CityCode != "" {
-					trySetCityCode(c.CityCode)
-				}
-			}
 			if inv.CityCode == "" {
 				if rawCityNameCell != "" {
 					inv.Errors = append(inv.Errors, fmt.Sprintf("Город из колонки сырого отчёта не найден в справочнике: %s", rawCityNameCell))
@@ -353,14 +375,15 @@ findHeader:
 				}
 			}
 
-			// Водителя подставляем по городу доставки (в сыром отчёте колонки водителей нет)
-			driver := s.store.GetDriverForCity(inv.CityCode)
+			// Водителя подставляем по קוד עיר; при отсутствии — по «מחוז» (без случайного fallback).
+			driver := s.store.GetDriverForCityOrDistrict(inv.CityCode, districtRaw)
 			if driver != nil {
 				inv.DriverName = driver.DriverName
 				inv.CarNumber = driver.CarNumber
 				inv.Phone = driver.Phone
 			} else if inv.CityCode != "" {
-				inv.Errors = append(inv.Errors, fmt.Sprintf("Для города %s не назначен водитель в справочнике", inv.CityCode))
+				slog.Warn("Для קוד עיר не назначен водитель — укажите город в справочнике водителей",
+					"invoice", invoiceNum, "city", inv.CityCode, "district", districtRaw)
 			}
 
 			invoiceMap[invoiceNum] = inv
@@ -370,12 +393,15 @@ findHeader:
 
 		item := s.store.GetItem(itemCode)
 		if item == nil {
-			if itemCode != "" {
-				// Не блокируем экспорт: вес уходит в UNKNOWN (кол. «נוסף א»); в справочник товаров можно добавить позже.
-				slog.Warn("Артикул не найден в справочнике — вес в отчёте как нераспределённый",
-					"invoice", invoiceNum, "item_code", itemCode, "kg", weightKg)
+			if cat := domain.MoHCategoryFromFishKAGroup(itemGroup, itemDesc); cat != "" {
+				inv.Weights[cat] += weightKg
+			} else if itemCode != "" {
+				slog.Warn("Артикул не найден в справочнике — вес в «אחר» (col 24)",
+					"invoice", invoiceNum, "item_code", itemCode, "group", itemGroup, "kg", weightKg)
+				inv.Weights["UNKNOWN"] += weightKg
+			} else {
+				inv.Weights["UNKNOWN"] += weightKg
 			}
-			inv.Weights["UNKNOWN"] += weightKg
 		} else {
 			catKey := domain.NormalizeText(item.Category)
 			if catKey == "" {

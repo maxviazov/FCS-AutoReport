@@ -52,9 +52,10 @@ func hebrewPrevOKBeforeCityToken(prev rune, cityName string) bool {
 	}
 }
 
-// AllowMoHN61CityCode — N61 в реестре МОЗ = אילת (Эйлат). Портал сверяет выгруженную כתובת (без города в префиксе «עיר, רחוב»),
-// поэтому «אילת, רחוב …» в SAP не считаем достаточным основанием для N61, если в правой части нет токена אילת
-// и מחוז не указывает Эйлат — иначе получается N61 + улица без אילת → «נקודות השיווק לא תקינים».
+// AllowMoHN61CityCode — N61 в реестре МОЗ = אילת (Эйлат). Используется при подборе кода города из сырого отчёта.
+// В SAP часто «אילת, רחוב …» — это достаточное основание для N61 (город явно в префиксе).
+// В колонке כתובת файла МОЗ город при «עיר, רחוב» убирается — самопроверка экспорта не должна опираться только на эту колонку для N61.
+// מחוז не учитываем: в FishKA часто «Эйлат»/«נפת אילת» при доставке не в Эйлате.
 func AllowMoHN61CityCode(addr, clientName, district, rawCityCol string) bool {
 	_ = clientName
 	_ = rawCityCol
@@ -64,23 +65,16 @@ func AllowMoHN61CityCode(addr, clientName, district, rawCityCol string) bool {
 	before, after, ok := strings.Cut(addrNorm, ",")
 	afterTrim := strings.TrimSpace(after)
 	beforeTrim := strings.TrimSpace(before)
-	// Префикс «אילת,» в экспорте убирается из כתובת — портал не видит город в строке адреса.
-	prefixEilatOnly := ok && beforeTrim == "אילת" && afterTrim != "" &&
-		!CitySubstringMatchesToken(NormalizeCityLookupKey(afterTrim), "אילת")
-
-	if !prefixEilatOnly {
-		addrKey := NormalizeCityLookupKey(addrTrim)
-		if CitySubstringMatchesToken(addrKey, "אילת") {
-			return true
-		}
-	}
-
-	if heb, ok := HebrewCityHintFromDistrictLabel(district); ok && strings.TrimSpace(heb) == "אילת" {
+	// Явный префикс «אילת,» в сыром адресе — реальный Эйлат (напр. אילת, החורש 9).
+	prefixEilat := ok && beforeTrim == "אילת" && afterTrim != ""
+	if prefixEilat && !CitySubstringMatchesToken(NormalizeCityLookupKey(afterTrim), "אילת") {
 		return true
 	}
-	distKey := NormalizeCityLookupKey(strings.TrimSpace(district))
-	if distKey != "" && CitySubstringMatchesToken(distKey, "אילת") {
+
+	addrKey := NormalizeCityLookupKey(addrTrim)
+	if CitySubstringMatchesToken(addrKey, "אילת") {
 		return true
 	}
+	_ = district
 	return false
 }

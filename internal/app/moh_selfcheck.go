@@ -25,14 +25,15 @@ func mohSelfCheckCell(f *excelize.File, sheet string, col, row int) string {
 	return strings.TrimSpace(v)
 }
 
-func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc mohDriverCols) []string {
+// mohSelfCheckDataRow возвращает (критичные для блокировки отправки, подсказки в sidecar).
+func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc mohDriverCols) (hard, soft []string) {
 	supplier := mohSelfCheckCell(f, sheet, 1, row)
 	hp := mohSelfCheckCell(f, sheet, 12, row)
 	if supplier == "" && hp == "" {
-		return nil
+		return nil, nil
 	}
-	var w []string
-	add := func(msg string) { w = append(w, msg) }
+	addHard := func(msg string) { hard = append(hard, msg) }
+	addSoft := func(msg string) { soft = append(soft, msg) }
 
 	city := mohSelfCheckCell(f, sheet, 10, row)
 	addr := mohSelfCheckCell(f, sheet, 11, row)
@@ -43,47 +44,52 @@ func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc 
 	inv := mohSelfCheckCell(f, sheet, 14, row)
 	date := mohSelfCheckCell(f, sheet, 4, row)
 	if date == "" {
-		add("תאריך пуст (колонка D)")
+		addHard("תאריך пуст (колонка D)")
 	}
 
 	if city == "" {
-		add("קוד עיר пуст — ветслужба часто отклоняет")
+		addHard("קוד עיר пуст — ветслужба часто отклоняет")
 	} else if !domain.IsMoHCityCodeFormat(city) {
-		add(fmt.Sprintf("קוד עיר %q не похож на формат МОЗ (буква + 2–4 цифры)", city))
-	} else if city == "N61" && !domain.AllowMoHN61CityCode(addr, client, "", "") {
-		add("N61 (אילת): в כתובת нет признаков Эйлата — портал МОЗ часто отклоняет такую связку")
+		addHard(fmt.Sprintf("קוד עיר %q не похож на формат МОЗ (буква + 2–4 цифры)", city))
 	}
 	if addr == "" {
-		add("כתובת пустая — נקודת שיווק без адреса")
+		addHard("כתובת пустая — נקודת שיווק без адреса")
 	}
 	if strings.Contains(addr, "רח'") || strings.Contains(addr, "רח׳") || strings.Contains(addr, "רח\u2018") || strings.Contains(addr, "רח\u2019") {
-		add("В адресе осталось «רח'» — лучше «רחוב» (как в реестре)")
+		addSoft("В адресе осталось «רח'» — лучше «רחוב» (как в реестре)")
+	}
+	if strings.Contains(addr, `\`) || strings.Contains(addr, "/") {
+		addSoft("В адресе есть «\\» или «/» — при экспорте обрезается хвост; проверьте номер дома")
 	}
 	if hp == "" {
-		add("ח\"פ לקוח пуст")
+		addHard("ח\"פ לקוח пуст")
 	} else {
 		d := domain.ClientHPDigits(hp)
 		if len(d) < 8 || len(d) > 9 {
-			add(fmt.Sprintf("ח\"פ: ожидают 8–9 цифр, сейчас %d (%q)", len(d), hp))
+			addHard(fmt.Sprintf("ח\"פ: ожидают 8–9 цифр, сейчас %d (%q)", len(d), hp))
 		}
 	}
 	if client == "" {
-		add("שם לקוח (לקוח) пуст")
+		addHard("שם לקוח (לקוח) пуст")
 	}
 	if domain.ContainsCyrillic(client) || domain.ContainsCyrillic(addr) {
-		add("В שם לקוח или כתובת есть кириллица — в реестре נקודות שיווק обычно иврит")
+		addHard("В שם לקוח или כתובת есть кириллица — в реестре נקודות שיווק обычно иврит")
 	}
 	if car == "" {
-		add("מס.רכב пуст")
+		addSoft("מס.רכב пуст — укажите водителя для קוד עיר в справочнике")
 	}
 	if driver == "" {
-		add("שם הנהג пуст")
+		addSoft("שם הנהג пуст — укажите водителя для קוד עיר в справочнике")
 	}
 	if phone == "" {
-		add("טלפון נהג пуст")
+		addSoft("טלפון נהג пуст")
 	}
 	if inv == "" {
-		add("מספר תעודת משלוח пуст")
+		addHard("מספר תעודת משלוח пуст")
+	}
+
+	if mohWeightOnlyInOtherColumn(f, sheet, row) {
+		addSoft("Весь вес в колонке «אחר» (24) — заполните справочник товаров или проверьте «שם קבוצה» в FishKA")
 	}
 
 	for col := 15; col <= 27; col++ {
@@ -92,33 +98,56 @@ func mohSelfCheckDataRow(f *excelize.File, sheet string, row, clientCol int, dc 
 			continue
 		}
 		if n, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64); err == nil && n < 0 {
-			add(fmt.Sprintf("отрицательное значение в колонке %d: %s", col, s))
+			addHard(fmt.Sprintf("отрицательное значение в колонке %d: %s", col, s))
 		}
 	}
 
 	sum := calcWeightsSumForRow(f, sheet, row)
 	if roundWeight(sum) <= 0 {
-		add("нулевой суммарный вес по категориям (столбцы 15–25)")
+		addHard("нулевой суммарный вес по категориям (столбцы 15–25)")
 	}
 	boxStr := mohSelfCheckCell(f, sheet, 26, row)
 	totalStr := mohSelfCheckCell(f, sheet, 27, row)
 	if tw, errTw := strconv.ParseFloat(strings.ReplaceAll(totalStr, ",", "."), 64); errTw == nil && tw > 0 {
 		if b, errB := strconv.ParseFloat(strings.ReplaceAll(boxStr, ",", "."), 64); errB == nil && b > 0 && b < domain.MoHMinBoxesLightFraction {
-			add(fmt.Sprintf("סה\"כ קרטונים %.2f < порога МОЗ %.2f при положительном весе", b, domain.MoHMinBoxesLightFraction))
+			addSoft(fmt.Sprintf("סה\"כ קרטונים %.2f < порога МОЗ %.2f при положительном весе", b, domain.MoHMinBoxesLightFraction))
 		}
 	}
 	if totalStr != "" {
 		if total, err := strconv.ParseFloat(strings.ReplaceAll(totalStr, ",", "."), 64); err == nil {
 			if roundWeight(sum) != roundWeight(total) {
-				add(fmt.Sprintf("סה\"כ משקל (%.2f) ≠ сумма категорий (%.2f)", total, sum))
+				addHard(fmt.Sprintf("סה\"כ משקל (%.2f) ≠ сумма категорий (%.2f)", total, sum))
 			}
 		}
 	}
 
-	return w
+	return hard, soft
 }
 
-// ValidateMoHReportFile блокирует отправку, если файл отчёта МОЗ не проходит проверку полей.
+func mohWeightOnlyInOtherColumn(f *excelize.File, sheet string, row int) bool {
+	var fishSum, other float64
+	for col := 15; col <= 23; col++ {
+		v := mohSelfCheckCell(f, sheet, col, row)
+		if v == "" {
+			continue
+		}
+		n, err := strconv.ParseFloat(strings.ReplaceAll(v, ",", "."), 64)
+		if err != nil || n <= 0 {
+			continue
+		}
+		fishSum += n
+	}
+	v24 := mohSelfCheckCell(f, sheet, 24, row)
+	if v24 != "" {
+		n, err := strconv.ParseFloat(strings.ReplaceAll(v24, ",", "."), 64)
+		if err == nil {
+			other = n
+		}
+	}
+	return fishSum == 0 && other > 0
+}
+
+// ValidateMoHReportFile блокирует отправку только по критичным полям; подсказки — в sidecar.
 func ValidateMoHReportFile(reportPath string) error {
 	f, err := excelize.OpenFile(reportPath)
 	if err != nil {
@@ -148,9 +177,11 @@ func ValidateMoHReportFile(reportPath string) error {
 			continue
 		}
 		dataRows++
-		for _, m := range mohSelfCheckDataRow(f, sh, row, clientCol, dc) {
+		hard, soft := mohSelfCheckDataRow(f, sh, row, clientCol, dc)
+		for _, m := range hard {
 			all = append(all, fmt.Sprintf("строка %d: %s", row, m))
 		}
+		_ = soft
 	}
 	if dataRows == 0 {
 		return fmt.Errorf("нет заполненных строк данных (поставщик/ח\"פ)")
@@ -167,7 +198,8 @@ func mohSelfCheckAfterExport(f *excelize.File, sheet string, lastRow int, export
 	dc := detectDriverColumns(f, sheet)
 	var lines []string
 	for row := 2; row <= lastRow; row++ {
-		for _, msg := range mohSelfCheckDataRow(f, sheet, row, clientCol, dc) {
+		hard, soft := mohSelfCheckDataRow(f, sheet, row, clientCol, dc)
+		for _, msg := range append(hard, soft...) {
 			line := fmt.Sprintf("row %d: %s", row, msg)
 			lines = append(lines, line)
 			slog.Warn("MoH самопроверка (נקודות שיווק)", "file", exportPath, "row", row, "hint", msg)

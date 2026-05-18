@@ -20,6 +20,22 @@ func TestInferCityPlacedAfterComma(t *testing.T) {
 	}
 }
 
+func TestNormalizeMinistryAddress_stripsPathSuffix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`אשדוד, העצמאות 23\87`, "אשדוד, העצמאות 23"},
+		{`העצמאות 23\87`, "העצמאות 23"},
+		{`העצמאות 23\\87`, "העצמאות 23"},
+		{`שבי ציון 2/124`, "שבי ציון 2"},
+		{`ראשונים 26/113`, "ראשונים 26"},
+		{"רחוב 5", "רחוב 5"},
+	}
+	for _, tc := range cases {
+		if got := NormalizeMinistryAddress(tc.in); got != tc.want {
+			t.Fatalf("NormalizeMinistryAddress(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestMoHStreetWithoutLeadingCity(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"תל אביב, שוק תקווה 39", "שוק תקווה 39"},
